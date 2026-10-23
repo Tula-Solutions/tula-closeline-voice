@@ -31,7 +31,7 @@ const describeRoute = (path: string, summary: string) =>
       },
       400: errorResponse('request.invalid: the callback names no valid Call, or is not valid.'),
       403: errorResponse('auth.forbidden: the signature is missing or does not match.'),
-      404: errorResponse('The Organization has no such Call.'),
+      404: errorResponse('call.provider_call_not_found: the Organization has no such Call.'),
       413: errorResponse('request.too_large'),
       500: errorResponse('Something went wrong on our side.'),
     },

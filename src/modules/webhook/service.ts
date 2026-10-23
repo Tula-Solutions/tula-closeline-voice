@@ -1,5 +1,5 @@
-import { callIdSchema, ERRORS, organizationIdSchema } from 'tula-closeline-contract'
-import { AppError, MAX_WEBHOOK_BODY_BYTES } from 'tula-closeline-kit'
+import { callIdSchema, ERRORS, organizationIdSchema, VOICE_ERRORS } from 'tula-closeline-contract'
+import { MAX_WEBHOOK_BODY_BYTES } from 'tula-closeline-kit'
 import { z } from 'zod'
 import type { Container } from '~/container'
 import { domainError } from '~/http/domain-error'
@@ -86,11 +86,7 @@ export async function receive(
     occurredAt: mapped.at,
   })
   if (result === 'unknown_call') {
-    throw new AppError({
-      code: ERRORS['request.invalid'].code,
-      status: 404,
-      message: 'The Call was not found.',
-    })
+    throw domainError(VOICE_ERRORS['call.provider_call_not_found'])
   }
   return result
 }

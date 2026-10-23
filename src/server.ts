@@ -1,11 +1,14 @@
 import { createApp } from '~/app'
 import { createContainer } from '~/container'
 import { serveOptions } from '~/http/serve'
+import { startTwilioPurgeSchedule } from '~/modules/purge/start'
 import { shutdown } from '~/shutdown'
 
 const container = createContainer()
 const app = createApp(container)
 const server = Bun.serve(serveOptions(container, app))
+// Only a deployment on the Postgres TwilioStore has a schedule; the timer is its only state.
+const purgeSchedule = startTwilioPurgeSchedule(container)
 
 container.logger.info('listening', { port: server.port, environment: container.env.ENVIRONMENT })
 
@@ -23,10 +26,13 @@ function stop(signal: string): void {
       if (code !== 0) {
         process.exit(code)
       }
-      container.close().then(
-        () => process.exit(0),
-        () => process.exit(1)
-      )
+      // The purge run in flight finishes before its database connections are released.
+      Promise.resolve(purgeSchedule?.stop())
+        .then(() => container.close())
+        .then(
+          () => process.exit(0),
+          () => process.exit(1)
+        )
     },
   })
 }

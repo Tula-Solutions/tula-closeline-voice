@@ -111,6 +111,13 @@ const schema = z
      * `TELEPHONY_PROVIDER=twilio`; `http` is accepted only when `local`.
      */
     WEBHOOK_BASE_URL: z.url().max(2_048).optional(),
+    /**
+     * How often, on average, each instance purges expired Twilio rows (jittered by 20% either way).
+     * It runs only when `TELEPHONY_PROVIDER=twilio`, the one case that stores them in Postgres.
+     */
+    TWILIO_PURGE_INTERVAL_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(900_000),
+    /** The most Organizations one purge run visits; the next run takes the rest. */
+    TWILIO_PURGE_MAX_ORGANIZATIONS: z.coerce.number().int().min(1).max(10_000).default(200),
   })
   .refine((env) => env.SHUTDOWN_GRACE_MS + env.SHUTDOWN_TIMEOUT_MS <= MAX_SHUTDOWN_TOTAL_MS, {
     message: `SHUTDOWN_GRACE_MS plus SHUTDOWN_TIMEOUT_MS must not exceed ${MAX_SHUTDOWN_TOTAL_MS} ms in total`,
