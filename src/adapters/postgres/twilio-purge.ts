@@ -24,6 +24,15 @@ export type TwilioPurgeOptions = {
   batchSize?: number
   /** Statements per table; defaults to {@link TWILIO_PURGE_MAX_BATCHES}. */
   maxBatches?: number
+  /** Longest any one statement may run, set locally in its transaction; unset keeps the pool's. */
+  statementTimeoutMs?: number
+  /** Epoch ms after which no new batch starts; the run then reports `drained: false`. */
+  deadline?: number
+}
+
+/** Caps the statements of the current transaction at `ms`; it ends with the transaction. */
+export async function setLocalStatementTimeout(tx: Transaction, ms: number): Promise<void> {
+  await tx.execute(sql`select set_config('statement_timeout', ${String(ms)}, true)`)
 }
 
 type PurgeTable = 'twilio_calls' | 'twilio_placements'
@@ -67,20 +76,34 @@ async function purgeTable(
   organizationId: string,
   now: Date,
   batchSize: number,
-  maxBatches: number
+  maxBatches: number,
+  timeoutMs?: number,
+  deadline?: number
 ): Promise<{ removed: number; drained: boolean }> {
   let removed = 0
   for (let batch = 0; batch < maxBatches; batch += 1) {
+    if (deadline !== undefined && Date.now() >= deadline) {
+      return { removed, drained: false }
+    }
     // One short transaction per batch, each scoped to the Organization.
-    const gone = await withOrganization(db, organizationId, (tx: Transaction) =>
-      tx.execute(purgeQuery(table, organizationId, now, batchSize))
-    )
+    const gone = await withOrganization(db, organizationId, async (tx: Transaction) => {
+      if (timeoutMs !== undefined) {
+        await setLocalStatementTimeout(tx, timeoutMs)
+      }
+      return tx.execute(purgeQuery(table, organizationId, now, batchSize))
+    })
     removed += gone.rows.length
     if (gone.rows.length === 0) {
       // A call locked by `withCall` is skipped, so an empty batch is not proof: look for leftovers.
-      const left = await withOrganization(db, organizationId, (tx: Transaction) =>
-        tx.execute(expiredExists(table, organizationId, now))
-      )
+      if (deadline !== undefined && Date.now() >= deadline) {
+        return { removed, drained: false }
+      }
+      const left = await withOrganization(db, organizationId, async (tx: Transaction) => {
+        if (timeoutMs !== undefined) {
+          await setLocalStatementTimeout(tx, timeoutMs)
+        }
+        return tx.execute(expiredExists(table, organizationId, now))
+      })
       return { removed, drained: left.rows.length === 0 }
     }
   }
@@ -113,14 +136,26 @@ export async function purgeExpiredTwilio(
     throw new RangeError('purgeExpiredTwilio: batchSize and maxBatches must be positive integers')
   }
   const now = options.now ?? new Date()
-  const calls = await purgeTable(db, 'twilio_calls', organizationId, now, batchSize, maxBatches)
+  const timeoutMs = options.statementTimeoutMs
+  const calls = await purgeTable(
+    db,
+    'twilio_calls',
+    organizationId,
+    now,
+    batchSize,
+    maxBatches,
+    timeoutMs,
+    options.deadline
+  )
   const placements = await purgeTable(
     db,
     'twilio_placements',
     organizationId,
     now,
     batchSize,
-    maxBatches
+    maxBatches,
+    timeoutMs,
+    options.deadline
   )
   return {
     calls: calls.removed,

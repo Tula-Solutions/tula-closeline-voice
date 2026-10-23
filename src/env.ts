@@ -130,6 +130,8 @@ const schema = z
     TWILIO_PURGE_INTERVAL_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(900_000),
     /** The most Organizations one purge run visits; the next run takes the rest. */
     TWILIO_PURGE_MAX_ORGANIZATIONS: z.coerce.number().int().min(1).max(10_000).default(200),
+    /** Longest one purge-source query (a scan page or an Organization's purge) may run, in ms. */
+    TWILIO_PURGE_QUERY_TIMEOUT_MS: z.coerce.number().int().min(100).max(300_000).default(10_000),
   })
   .refine((env) => env.SHUTDOWN_GRACE_MS + env.SHUTDOWN_TIMEOUT_MS <= MAX_SHUTDOWN_TOTAL_MS, {
     message: `SHUTDOWN_GRACE_MS plus SHUTDOWN_TIMEOUT_MS must not exceed ${MAX_SHUTDOWN_TOTAL_MS} ms in total`,

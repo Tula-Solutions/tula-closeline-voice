@@ -205,7 +205,12 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).
     directory: createDirectory(env),
     ...(env.TELEPHONY_PROVIDER === 'twilio'
-      ? { twilioPurge: createPostgresTwilioPurgeSource(database.db) }
+      ? {
+          twilioPurge: createPostgresTwilioPurgeSource(
+            database.db,
+            env.TWILIO_PURGE_QUERY_TIMEOUT_MS
+          ),
+        }
       : {}),
     close: database.close,
     readinessChecks: [

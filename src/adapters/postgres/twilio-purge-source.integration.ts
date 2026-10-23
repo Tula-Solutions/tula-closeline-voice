@@ -4,6 +4,7 @@ import { createDb, withOrganization } from 'tula-closeline-db'
 import { createFixedClock, createLogger } from 'tula-closeline-kit'
 import { integrationUrls } from '~/integration-support'
 import { runTwilioPurge } from '~/modules/purge/twilio-purge-job'
+import { purgeExpiredTwilio, setLocalStatementTimeout } from './twilio-purge'
 import { createPostgresTwilioPurgeSource } from './twilio-purge-source'
 import { createPostgresTwilioStore } from './twilio-store'
 import { callRecord, newOrganizationId, newProviderCallId } from './twilio-store.behaviour'
@@ -83,5 +84,42 @@ describe('the Postgres purge source', () => {
       const next = await source.organizationsWithExpired(new Date(), first[0], 500)
       expect(next).not.toContain(first[0])
     }
+  })
+
+  test('a transaction-local statement timeout cancels a slow statement and ends with the transaction', async () => {
+    const organizationId = newOrganizationId()
+    const started = Date.now()
+    await expect(
+      withOrganization(service.db, organizationId, async (tx) => {
+        await setLocalStatementTimeout(tx, 200)
+        await tx.execute(sql`select pg_sleep(5)`)
+      })
+    ).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(3_000)
+    // The pooled connection is not left capped: a later transaction is not cancelled at 200 ms.
+    await withOrganization(service.db, organizationId, (tx) =>
+      tx.execute(sql`select pg_sleep(0.5)`)
+    )
+  })
+
+  test('a source with a query timeout still scans and purges', async () => {
+    const organizationId = newOrganizationId()
+    await seedCall(organizationId, true)
+    const bounded = createPostgresTwilioPurgeSource(service.db, 5_000)
+    expect(await bounded.organizationsWithExpired(new Date(), null, 500)).toContain(organizationId)
+    expect(await bounded.purge(organizationId, new Date())).toMatchObject({ calls: 1 })
+    expect(await remaining(organizationId)).toBe(0)
+  })
+
+  test('a purge past its deadline starts no new batch and reports it undrained', async () => {
+    const organizationId = newOrganizationId()
+    await seedCall(organizationId, true)
+    const result = await purgeExpiredTwilio(service.db, organizationId, {
+      now: new Date(),
+      deadline: Date.now() - 1,
+    })
+    expect(result).toMatchObject({ calls: 0, drained: false })
+    expect(await remaining(organizationId)).toBe(1)
+    expect(await purgeExpiredTwilio(service.db, organizationId)).toMatchObject({ calls: 1 })
   })
 })
