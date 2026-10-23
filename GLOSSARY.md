@@ -130,3 +130,11 @@ _Avoid_: Permission check, compliance check
 **Consent Wording**:
 The exact text a Prospect was shown when agreeing, kept unchanged.
 _Avoid_: Disclaimer, terms
+
+**CRM connection**:
+An Organization's authorised link to one external customer-relationship system, from which Closeline reads and to which it can write.
+_Avoid_: Integration (generic), sync account, plug-in
+
+**Stage mapping**:
+An Admin's rule saying which CRM deal stages mean won, lost or open.
+_Avoid_: Pipeline mapping, status mapping
