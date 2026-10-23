@@ -44,11 +44,11 @@ describe('POST /v1/lines with an Idempotency-Key over Postgres', () => {
     const t = await postgresApp()
     let bought = 0
     const { buy } = t.deps.numbers
-    t.deps.numbers.buy = async (request) => {
+    t.deps.numbers.buy = async (request, signal) => {
       bought += 1
       // The memory provisioner repeats numbers across runs, and a live number is unique in the database.
       return {
-        ...(await buy(request)),
+        ...(await buy(request, signal)),
         number: `+1555${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`,
       }
     }

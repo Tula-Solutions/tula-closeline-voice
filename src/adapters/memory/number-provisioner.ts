@@ -32,7 +32,8 @@ export function createMemoryNumberProvisioner(
 
   return {
     released,
-    async buy({ country, areaCode }) {
+    async buy({ country, areaCode }, signal) {
+      signal.throwIfAborted()
       const providerSid = next()
       const subscriber = String(counter % SUBSCRIBER_SPACE).padStart(4, '0')
       return {
@@ -42,13 +43,15 @@ export function createMemoryNumberProvisioner(
         state: 'active',
       }
     },
-    async port(number) {
+    async port(number, signal) {
+      signal.throwIfAborted()
       const country =
         Object.entries(DIALLING_CODES).find(([, code]) => number.startsWith(`+${code}`))?.[0] ??
         'US'
       return { number, country, providerSid: next(), state: 'porting' }
     },
-    async release(providerSid) {
+    async release(providerSid, signal) {
+      signal.throwIfAborted()
       released.push(providerSid)
     },
   }

@@ -13,12 +13,22 @@ export type ProvisionedNumber = {
 /** What the Admin asked for when buying a new number. */
 export type BuyRequest = { country: string; areaCode?: string | undefined }
 
-/** Buys, ports and releases phone numbers at the telephony provider. */
+/**
+ * How long add-Line waits for the provider before it gives up, in milliseconds. It sits well under
+ * the 60s after which the database closes a transaction that is idle, because add-Line holds one
+ * open across the buy or port.
+ */
+export const NUMBER_PROVISIONER_TIMEOUT_MS = 15_000
+
+/**
+ * Buys, ports and releases phone numbers at the telephony provider. Every call takes an abort
+ * signal and must reject once it fires, so a caller can bound the time it waits.
+ */
 export type NumberProvisioner = {
   /** Buys a number in `country`, optionally within an area code. */
-  buy: (request: BuyRequest) => Promise<ProvisionedNumber>
+  buy: (request: BuyRequest, signal: AbortSignal) => Promise<ProvisionedNumber>
   /** Starts porting a number the Organization already owns in. */
-  port: (number: string) => Promise<ProvisionedNumber>
+  port: (number: string, signal: AbortSignal) => Promise<ProvisionedNumber>
   /** Gives the number back to the provider. Releasing a number already gone succeeds. */
-  release: (providerSid: string) => Promise<void>
+  release: (providerSid: string, signal: AbortSignal) => Promise<void>
 }

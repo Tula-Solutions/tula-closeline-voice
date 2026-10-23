@@ -27,6 +27,7 @@ import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
 import { loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { NUMBER_PROVISIONER_TIMEOUT_MS } from '~/ports/number-provisioner'
 
 /** Every key a deployed environment must set, so a test can run as any ENVIRONMENT. */
 const DEPLOYED_ENV: Readonly<Record<string, string>> = {
@@ -89,6 +90,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     lines: createMemoryLineStore(),
     idempotency: createMemoryIdempotencyStore(),
     numbers: createMemoryNumberProvisioner(),
+    numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     directory: createMemoryOrganizationDirectory(),
     close: async () => undefined,
     readinessChecks: overrides.readinessChecks ?? [],

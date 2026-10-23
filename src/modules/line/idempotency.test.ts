@@ -40,13 +40,13 @@ async function post(who: TestIdentity, body: unknown, headers: Record<string, st
 function countProvisioning(): { calls: () => number } {
   let calls = 0
   const { buy, port } = t.deps.numbers
-  t.deps.numbers.buy = async (request) => {
+  t.deps.numbers.buy = async (request, signal) => {
     calls += 1
-    return buy(request)
+    return buy(request, signal)
   }
-  t.deps.numbers.port = async (number) => {
+  t.deps.numbers.port = async (number, signal) => {
     calls += 1
-    return port(number)
+    return port(number, signal)
   }
   return { calls: () => calls }
 }
@@ -94,10 +94,10 @@ describe('adding a Line with an Idempotency-Key', () => {
     })
     const { buy } = t.deps.numbers
     let calls = 0
-    t.deps.numbers.buy = async (request) => {
+    t.deps.numbers.buy = async (request, signal) => {
       calls += 1
       await gate
-      return buy(request)
+      return buy(request, signal)
     }
     const first = post(admin, buyBody, { 'idempotency-key': KEY })
     await Bun.sleep(20)
@@ -213,9 +213,9 @@ describe('adding a Line with an Idempotency-Key', () => {
   it('gives the number back when the key cannot be stored after the purchase', async () => {
     const released: string[] = []
     const { release } = t.deps.numbers
-    t.deps.numbers.release = async (sid) => {
+    t.deps.numbers.release = async (sid, signal) => {
       released.push(sid)
-      return release(sid)
+      return release(sid, signal)
     }
     const { withOrganization } = t.deps.idempotency
     t.deps.idempotency.withOrganization = (organizationId, fn) =>
