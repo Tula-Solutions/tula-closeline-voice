@@ -19,6 +19,7 @@ test('configuration falls back to defaults for everything but the environment', 
     TELEPHONY_PROVIDER: 'memory',
     TWILIO_PURGE_INTERVAL_MS: 900_000,
     TWILIO_PURGE_MAX_ORGANIZATIONS: 200,
+    TWILIO_PURGE_QUERY_TIMEOUT_MS: 10_000,
   })
 })
 
@@ -27,6 +28,8 @@ test('the purge interval and Organization cap are bounded', () => {
   expect(at({ TWILIO_PURGE_INTERVAL_MS: '60000' }).TWILIO_PURGE_INTERVAL_MS).toBe(60_000)
   expect(() => at({ TWILIO_PURGE_INTERVAL_MS: '10' })).toThrow()
   expect(() => at({ TWILIO_PURGE_MAX_ORGANIZATIONS: '0' })).toThrow()
+  expect(at({ TWILIO_PURGE_QUERY_TIMEOUT_MS: '5000' }).TWILIO_PURGE_QUERY_TIMEOUT_MS).toBe(5000)
+  expect(() => at({ TWILIO_PURGE_QUERY_TIMEOUT_MS: '10' })).toThrow()
 })
 
 const DEPLOYED = {

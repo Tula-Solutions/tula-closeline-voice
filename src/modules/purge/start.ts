@@ -1,5 +1,6 @@
 import { formatId } from 'tula-closeline-contract'
 import { type Container, reportSafely } from '~/container'
+import { boundTwilioPurgeSource } from './bound-source'
 import { type Schedule, startSchedule } from './schedule'
 import { runTwilioPurge } from './twilio-purge-job'
 
@@ -20,7 +21,12 @@ export function startTwilioPurgeSchedule(container: Container): Schedule | undef
       path: 'twilio-purge',
       status: 500,
     })
-  const deps = { source, clock: container.clock, logger: container.logger, reportError }
+  const deps = {
+    source: boundTwilioPurgeSource(source, container.env.TWILIO_PURGE_QUERY_TIMEOUT_MS),
+    clock: container.clock,
+    logger: container.logger,
+    reportError,
+  }
   // Only a hint where to resume; lost on restart, which just starts the scan over.
   let cursor: string | null = null
   const schedule = startSchedule({
