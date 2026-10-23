@@ -80,6 +80,65 @@ describe('adding a Line', () => {
     expect(t.deps.numbers.released.length).toBe(before + 1)
   })
 
+  it('answers server.unavailable (503) when the provisioner outlives its deadline', async () => {
+    t.deps.numberTimeoutMs = 20
+    let seen: AbortSignal | undefined
+    t.deps.numbers.buy = (_request, signal) => {
+      seen = signal
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    }
+    const { status, body } = await buy(admin)
+    expect(status).toBe(503)
+    expect(codeOf(body)).toBe('server.unavailable')
+    expect(seen?.aborted).toBe(true)
+    const page = (await t.call(admin, 'GET', '/lines')).body as PageBody
+    expect(page.items).toHaveLength(0)
+  })
+
+  it('frees the Idempotency-Key when the provisioner times out, so a retry buys', async () => {
+    t.deps.numberTimeoutMs = 20
+    const real = t.deps.numbers.port
+    let hang = true
+    t.deps.numbers.port = (number, signal) =>
+      hang
+        ? new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          })
+        : real(number, signal)
+    const headers = { 'idempotency-key': 'timeout-key-0001' }
+    const body = { method: 'port', number: '+14155550100' }
+    const first = await t.app.request('/v1/lines', {
+      method: 'POST',
+      headers: { ...(await t.bearer(admin)), ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    expect(first.status).toBe(503)
+    hang = false
+    const retry = await t.app.request('/v1/lines', {
+      method: 'POST',
+      headers: { ...(await t.bearer(admin)), ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    expect(retry.status).toBe(201)
+  })
+
+  it('gives back a number it holds when the deadline passes after the purchase, once the purchase completes', async () => {
+    t.deps.numberTimeoutMs = 20
+    const real = t.deps.numbers.buy
+    t.deps.numbers.buy = async (request, signal) => {
+      const bought = await real(request, signal)
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      return bought
+    }
+    const { status, body } = await buy(admin)
+    expect(status).toBe(503)
+    expect(codeOf(body)).toBe('server.unavailable')
+    await Bun.sleep(60)
+    expect(t.deps.numbers.released).toEqual(['mem_000001'])
+  })
+
   it('refuses a Rep with 403 auth.forbidden', async () => {
     const { status, body } = await buy(rep)
     expect(status).toBe(403)
@@ -277,11 +336,11 @@ describe('releasing a Line', () => {
     const line = (await buy(admin)).body as LineBody
     const real = t.deps.numbers.release
     let failures = 1
-    t.deps.numbers.release = async (sid) => {
+    t.deps.numbers.release = async (sid, signal) => {
       if (failures-- > 0) {
         throw new Error('provider down')
       }
-      return real(sid)
+      return real(sid, signal)
     }
     const first = await t.call(admin, 'POST', `/lines/${line.id}/release`)
     expect(first.status).toBe(500)

@@ -43,6 +43,7 @@ const list = createRoute({
     400: errorResponse('request.invalid: the query or the cursor is not valid.'),
     401: unauthorized,
     500: serverError,
+    503: errorResponse('server.unavailable: the telephony provider did not answer in time.'),
   },
 })
 

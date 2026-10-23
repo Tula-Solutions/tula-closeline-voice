@@ -23,7 +23,7 @@ import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
-import type { NumberProvisioner } from '~/ports/number-provisioner'
+import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
@@ -57,6 +57,8 @@ export type Container = {
   idempotency: IdempotencyStore
   /** Buys, ports and releases numbers at the telephony provider. */
   numbers: NumberProvisioner
+  /** How long a call to `numbers` may take before the service gives up on it, in milliseconds. */
+  numberTimeoutMs: number
   /** Teams and Reps of an Organization, held by the core service. */
   directory: OrganizationDirectory
   /** Releases the database connections; safe to call more than once. */
@@ -130,6 +132,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
       env.TELEPHONY_PROVIDER === 'memory'
         ? createRunningMemoryNumberProvisioner()
         : createUnconfiguredNumberProvisioner(),
+    numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     // Teams and Reps live in core's schema, which this service never reads; the link to core
     // arrives with its own ticket, and until then naming a Team or Rep fails closed.
     directory: createUnconfiguredOrganizationDirectory(),

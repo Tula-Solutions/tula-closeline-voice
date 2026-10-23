@@ -30,7 +30,7 @@ type LinePage = z.infer<typeof linePageSchema>
 /** What the Lines service needs from the container. */
 export type LineDeps = Pick<
   Container,
-  'lines' | 'numbers' | 'directory' | 'clock' | 'logger' | 'idempotency'
+  'lines' | 'numbers' | 'numberTimeoutMs' | 'directory' | 'clock' | 'logger' | 'idempotency'
 >
 
 /** Drops what is internal to the service (the provider's id) before a Line leaves it. */
@@ -83,6 +83,54 @@ export async function get(deps: LineDeps, caller: Caller, id: Line['id']): Promi
   return toLine(stored)
 }
 
+/**
+ * Runs one call to the telephony provider under the deadline `deps.numberTimeoutMs`. A call that
+ * outlives it (whether or not the adapter honours the signal) answers `server.unavailable`. A
+ * result that still arrives after the deadline is handed to `late`, so a number the provider
+ * went on to buy can be given back.
+ */
+async function withinDeadline<T>(
+  deps: LineDeps,
+  call: (signal: AbortSignal) => Promise<T>,
+  late?: (result: T) => void
+): Promise<T> {
+  const signal = AbortSignal.timeout(deps.numberTimeoutMs)
+  const expired = new Promise<never>((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+  })
+  const running = call(signal)
+  // If the deadline wins, the call may still finish later: hand a late result on, and drop a late
+  // rejection so it does not go unhandled.
+  running.then(
+    (value) => {
+      if (signal.aborted) {
+        late?.(value)
+      }
+    },
+    () => undefined
+  )
+  let result: T
+  try {
+    result = await Promise.race([running, expired])
+  } catch (error) {
+    if (signal.aborted) {
+      deps.logger.warn('line.provisioner.timeout', { timeoutMs: deps.numberTimeoutMs })
+      throw domainError(ERRORS['server.unavailable'])
+    }
+    throw error
+  }
+  return result
+}
+
+/** Gives a number back to the provider under the deadline; a failure is logged, never thrown. */
+async function giveBack(deps: LineDeps, providerSid: string): Promise<void> {
+  await withinDeadline(deps, (signal) => deps.numbers.release(providerSid, signal)).catch(
+    (releaseError: unknown) => {
+      deps.logger.error('line.add.release_failed', describeError(releaseError))
+    }
+  )
+}
+
 /** The route name an add-Line `Idempotency-Key` is stored under. */
 export const ADD_LINE_ROUTE = 'lines.add'
 
@@ -98,12 +146,22 @@ async function buyAndRecord(
   held: { providerSid: string | null },
   within?: IdempotencyScope
 ): Promise<Line> {
-  let provisioned: ProvisionedNumber
-  if (request.method === 'buy') {
-    provisioned = await deps.numbers.buy({ country: request.country, areaCode: request.areaCode })
-  } else {
-    provisioned = await deps.numbers.port(request.number)
+  const giveBackLate = (late: ProvisionedNumber): void => {
+    void giveBack(deps, late.providerSid)
   }
+  const provisioned: ProvisionedNumber =
+    request.method === 'buy'
+      ? await withinDeadline(
+          deps,
+          (signal) =>
+            deps.numbers.buy({ country: request.country, areaCode: request.areaCode }, signal),
+          giveBackLate
+        )
+      : await withinDeadline(
+          deps,
+          (signal) => deps.numbers.port(request.number, signal),
+          giveBackLate
+        )
   held.providerSid = provisioned.providerSid
   try {
     const stored = await deps.lines.insert(
@@ -168,9 +226,7 @@ export async function add(
     // Anything failing after the purchase (the Line, the key, the commit) rolls the Line back:
     // the number is paid for but no Line holds it, so give it back and nothing is left behind.
     if (held.providerSid !== null) {
-      await deps.numbers.release(held.providerSid).catch((releaseError: unknown) => {
-        deps.logger.error('line.add.release_failed', describeError(releaseError))
-      })
+      await giveBack(deps, held.providerSid)
     }
     throw error
   }
@@ -229,7 +285,8 @@ export async function release(deps: LineDeps, caller: Caller, id: Line['id']): P
   // The provider id stays until the number is back, so a retry after a provider failure finishes
   // the job. Giving a number back is idempotent at the provider, so a concurrent repeat is safe.
   if (released.providerSid !== null) {
-    await deps.numbers.release(released.providerSid)
+    const providerSid = released.providerSid
+    await withinDeadline(deps, (signal) => deps.numbers.release(providerSid, signal))
     await deps.lines.clearProviderSid(caller.organizationId, id)
   }
   return toLine({ ...released, providerSid: null })
