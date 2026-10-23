@@ -1,4 +1,5 @@
 import { regionSchema } from 'tula-closeline-contract'
+import { TWILIO_REGIONS } from 'tula-closeline-kit'
 import { z } from 'zod'
 
 /** The most grace plus drain may add up to, so an orchestrator's kill window is not outlasted. */
@@ -26,6 +27,16 @@ const REQUIRED_OUTSIDE_LOCAL = [
   'QUEUE_URL',
   'STORAGE_BUCKET',
   'TELEPHONY_PROVIDER',
+] as const
+
+/** The Twilio keys a `twilio` provider cannot run without. */
+const TWILIO_REQUIRED = [
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_API_KEY_SID',
+  'TWILIO_API_KEY_SECRET',
+  'TWILIO_AUTH_TOKEN',
+  'TWILIO_TWIML_APP_SID',
+  'WEBHOOK_BASE_URL',
 ] as const
 
 const schema = z
@@ -70,9 +81,36 @@ const schema = z
     STORAGE_ENDPOINT: z.url().max(2_048).optional(),
     /**
      * The telephony provider. `memory` is the in-process stand-in and is accepted only when
-     * `local`; `twilio` is the real one and fails closed until its adapter is configured.
+     * `local`; `twilio` is the real one and needs the TWILIO_* keys and WEBHOOK_BASE_URL.
      */
     TELEPHONY_PROVIDER: z.enum(['memory', 'twilio']).optional(),
+    /** Twilio Account SID. Required when `TELEPHONY_PROVIDER=twilio`. */
+    TWILIO_ACCOUNT_SID: z
+      .string()
+      .regex(/^AC[0-9a-f]{32}$/, 'TWILIO_ACCOUNT_SID must be AC and 32 hex digits')
+      .optional(),
+    /** SID of the Twilio API key that signs requests and Softphone tokens. */
+    TWILIO_API_KEY_SID: z
+      .string()
+      .regex(/^SK[0-9a-f]{32}$/, 'TWILIO_API_KEY_SID must be SK and 32 hex digits')
+      .optional(),
+    /** Secret of that API key. A credential: never log it. */
+    TWILIO_API_KEY_SECRET: z.string().min(16).max(256).optional(),
+    /** The Auth Token, used only to verify webhook signatures. A credential: never log it. */
+    TWILIO_AUTH_TOKEN: z.string().min(16).max(256).optional(),
+    /** SID of the TwiML App the Softphone dials out through. */
+    TWILIO_TWIML_APP_SID: z
+      .string()
+      .regex(/^AP[0-9a-f]{32}$/, 'TWILIO_TWIML_APP_SID must be AP and 32 hex digits')
+      .optional(),
+    /** The Twilio region of the account's API keys; omit for the US default. */
+    TWILIO_REGION: z.enum(TWILIO_REGIONS).optional(),
+    /**
+     * The public https origin Twilio reaches this service on (no path), for the status callbacks the
+     * adapter registers and for rebuilding the URL a webhook signature covers. Required when
+     * `TELEPHONY_PROVIDER=twilio`; `http` is accepted only when `local`.
+     */
+    WEBHOOK_BASE_URL: z.url().max(2_048).optional(),
   })
   .refine((env) => env.SHUTDOWN_GRACE_MS + env.SHUTDOWN_TIMEOUT_MS <= MAX_SHUTDOWN_TOTAL_MS, {
     message: `SHUTDOWN_GRACE_MS plus SHUTDOWN_TIMEOUT_MS must not exceed ${MAX_SHUTDOWN_TOTAL_MS} ms in total`,
@@ -91,6 +129,35 @@ const schema = z
           code: 'custom',
           path: ['TELEPHONY_PROVIDER'],
           message: 'TELEPHONY_PROVIDER memory is accepted only when ENVIRONMENT is local',
+        })
+      }
+    }
+    if (env.TELEPHONY_PROVIDER === 'twilio') {
+      for (const key of TWILIO_REQUIRED) {
+        if (env[key] === undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} is required when TELEPHONY_PROVIDER is twilio`,
+          })
+        }
+      }
+    }
+    if (env.WEBHOOK_BASE_URL !== undefined) {
+      const base = new URL(env.WEBHOOK_BASE_URL)
+      const insecureOk = env.ENVIRONMENT === 'local'
+      if (base.protocol !== 'https:' && !(insecureOk && base.protocol === 'http:')) {
+        context.addIssue({
+          code: 'custom',
+          path: ['WEBHOOK_BASE_URL'],
+          message: 'WEBHOOK_BASE_URL must be https (http only when ENVIRONMENT is local)',
+        })
+      }
+      if (base.pathname !== '/' || base.search !== '' || base.hash !== '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['WEBHOOK_BASE_URL'],
+          message: 'WEBHOOK_BASE_URL must be an origin only, with no path or query',
         })
       }
     }

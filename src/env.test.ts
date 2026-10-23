@@ -30,6 +30,12 @@ const DEPLOYED = {
   QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/voice-events',
   STORAGE_BUCKET: 'closeline-voice-recordings',
   TELEPHONY_PROVIDER: 'twilio',
+  TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
+  TWILIO_API_KEY_SID: `SK${'b'.repeat(32)}`,
+  TWILIO_API_KEY_SECRET: 'api-key-secret-0123456789',
+  TWILIO_AUTH_TOKEN: 'auth-token-0123456789abcdef',
+  TWILIO_TWIML_APP_SID: `AP${'c'.repeat(32)}`,
+  WEBHOOK_BASE_URL: 'https://voice.example',
 }
 
 test('a deployed environment accepts the full set of keys', () => {
@@ -103,4 +109,27 @@ test('a grace period plus drain timeout of exactly 60 s is accepted', () => {
   })
 
   expect(env.SHUTDOWN_GRACE_MS + env.SHUTDOWN_TIMEOUT_MS).toBe(60_000)
+})
+
+test('twilio needs its credentials and an https origin to be reached on', () => {
+  expect(() => loadEnv({ ENVIRONMENT: 'local', TELEPHONY_PROVIDER: 'twilio' })).toThrow(
+    'TWILIO_AUTH_TOKEN'
+  )
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, WEBHOOK_BASE_URL: 'http://voice.example' })
+  ).toThrow('WEBHOOK_BASE_URL')
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, WEBHOOK_BASE_URL: 'https://voice.example/hooks' })
+  ).toThrow('origin only')
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, TWILIO_ACCOUNT_SID: 'not-a-sid' })
+  ).toThrow('TWILIO_ACCOUNT_SID')
+  expect(
+    loadEnv({
+      ENVIRONMENT: 'local',
+      ...DEPLOYED,
+      WEBHOOK_BASE_URL: 'http://127.0.0.1:3000',
+      TWILIO_REGION: 'ie1',
+    })
+  ).toMatchObject({ TWILIO_REGION: 'ie1' })
 })

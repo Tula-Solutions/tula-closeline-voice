@@ -6,10 +6,20 @@ import {
   createStaticKeySet,
   createTokenVerifier,
   type FixedClock,
+  type TelephonyPort,
   TokenVerificationError,
   type TokenVerifier,
 } from 'tula-closeline-kit'
-import { createTestJwks, createTestKeyPair, mintTestToken } from 'tula-closeline-kit/testing'
+import {
+  createMemoryTelephony,
+  createTestJwks,
+  createTestKeyPair,
+  mintTestToken,
+} from 'tula-closeline-kit/testing'
+import {
+  createMemoryCallEventStore,
+  type MemoryCallEventStore,
+} from '~/adapters/memory/call-event-store'
 import {
   createMemoryIdempotencyStore,
   type MemoryIdempotencyStore,
@@ -40,6 +50,12 @@ const DEPLOYED_ENV: Readonly<Record<string, string>> = {
   QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/voice',
   STORAGE_BUCKET: 'closeline-voice-test',
   TELEPHONY_PROVIDER: 'twilio',
+  TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
+  TWILIO_API_KEY_SID: `SK${'b'.repeat(32)}`,
+  TWILIO_API_KEY_SECRET: 'api-key-secret-0123456789',
+  TWILIO_AUTH_TOKEN: 'auth-token-0123456789abcdef',
+  TWILIO_TWIML_APP_SID: `AP${'c'.repeat(32)}`,
+  WEBHOOK_BASE_URL: 'https://voice.example',
 }
 
 /** A verifier that accepts nothing, for a test that never sends a token. */
@@ -55,6 +71,7 @@ export type TestDeps = Container & {
   idempotency: MemoryIdempotencyStore
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
+  callEvents: MemoryCallEventStore
   /** Every JSON log line written, in order. */
   logLines: string[]
   /** Every call to `reportError`, in order. */
@@ -66,6 +83,8 @@ export type TestDepsOverrides = {
   readinessChecks?: readonly ReadinessCheck[]
   env?: Record<string, string>
   tokenVerifier?: TokenVerifier
+  /** Replaces the telephony adapter, e.g. with the real Twilio adapter over a stubbed fetch. */
+  telephony?: TelephonyPort
 }
 
 /** Builds a container of in-memory doubles and a fixed clock; `overrides` replace any field. */
@@ -91,6 +110,8 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     idempotency: createMemoryIdempotencyStore(),
     numbers: createMemoryNumberProvisioner(),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
+    telephony: overrides.telephony ?? createMemoryTelephony(),
+    callEvents: createMemoryCallEventStore(),
     directory: createMemoryOrganizationDirectory(),
     close: async () => undefined,
     readinessChecks: overrides.readinessChecks ?? [],
@@ -135,6 +156,7 @@ export async function createTestApp(overrides: TestDepsOverrides = {}): Promise<
     tokenVerifier: verifier,
     env: { AUTH_ISSUER: 'https://auth.test', AUTH_AUDIENCE: 'closeline', ...overrides.env },
     ...(overrides.readinessChecks ? { readinessChecks: overrides.readinessChecks } : {}),
+    ...(overrides.telephony ? { telephony: overrides.telephony } : {}),
   })
   // Tokens are minted and verified at the same instant, whatever the test advances the clock to.
   deps.clock = clock

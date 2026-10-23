@@ -26,6 +26,9 @@ test('the app serves its OpenAPI document describing every route and the error b
     '/v1/lines/{lineId}',
     '/v1/lines/{lineId}/assignment',
     '/v1/lines/{lineId}/release',
+    '/v1/softphone/token',
+    '/webhooks/twilio/recording',
+    '/webhooks/twilio/status',
   ])
   expect(document.paths['/healthz']?.get.responses['500']).toBeDefined()
   expect(document.paths['/readyz']?.get.responses['503']).toBeDefined()
