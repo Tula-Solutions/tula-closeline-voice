@@ -9,6 +9,7 @@ import {
   type ListLinesQuery,
   lineCursorSchema,
   type linePageSchema,
+  lineSchema,
   type Role,
   VOICE_ADMIN_ROLES,
   VOICE_ERRORS,
@@ -18,6 +19,8 @@ import type { Container } from '~/container'
 import { describeError } from '~/describe-error'
 import { domainError } from '~/http/domain-error'
 import type { Caller } from '~/modules/caller'
+import { type IdempotentAnswer, idempotent } from '~/modules/idempotency/service'
+import type { IdempotencyScope } from '~/ports/idempotency-store'
 import { NumberTakenError, type StoredLine } from '~/ports/line-store'
 import type { ProvisionedNumber } from '~/ports/number-provisioner'
 
@@ -25,7 +28,10 @@ import type { ProvisionedNumber } from '~/ports/number-provisioner'
 type LinePage = z.infer<typeof linePageSchema>
 
 /** What the Lines service needs from the container. */
-export type LineDeps = Pick<Container, 'lines' | 'numbers' | 'directory' | 'clock' | 'logger'>
+export type LineDeps = Pick<
+  Container,
+  'lines' | 'numbers' | 'directory' | 'clock' | 'logger' | 'idempotency'
+>
 
 /** Drops what is internal to the service (the provider's id) before a Line leaves it. */
 function toLine(stored: StoredLine): Line {
@@ -77,28 +83,36 @@ export async function get(deps: LineDeps, caller: Caller, id: Line['id']): Promi
   return toLine(stored)
 }
 
-/** Buys or ports a number and records it as a new, unassigned Line. */
-export async function add(deps: LineDeps, caller: Caller, request: AddLineRequest): Promise<Line> {
-  requireAdmin(caller)
+/** The route name an add-Line `Idempotency-Key` is stored under. */
+export const ADD_LINE_ROUTE = 'lines.add'
+
+/** Buys or ports a number and records it as a new, unassigned Line, inside `within` when given. */
+async function buyAndRecord(
+  deps: LineDeps,
+  caller: Caller,
+  request: AddLineRequest,
+  within?: IdempotencyScope
+): Promise<Line> {
   let provisioned: ProvisionedNumber
-  let country: string
   if (request.method === 'buy') {
     provisioned = await deps.numbers.buy({ country: request.country, areaCode: request.areaCode })
-    country = provisioned.country
   } else {
     provisioned = await deps.numbers.port(request.number)
-    country = provisioned.country
   }
   try {
-    const stored = await deps.lines.insert(caller.organizationId, {
-      id: formatId('line', crypto.randomUUID()),
-      number: provisioned.number,
-      country,
-      label: request.label ?? null,
-      state: provisioned.state,
-      providerSid: provisioned.providerSid,
-      createdAt: deps.clock.now(),
-    })
+    const stored = await deps.lines.insert(
+      caller.organizationId,
+      {
+        id: formatId('line', crypto.randomUUID()),
+        number: provisioned.number,
+        country: provisioned.country,
+        label: request.label ?? null,
+        state: provisioned.state,
+        providerSid: provisioned.providerSid,
+        createdAt: deps.clock.now(),
+      },
+      within
+    )
     return toLine(stored)
   } catch (error) {
     // The number is paid for but no Line holds it: give it back so nothing is left behind.
@@ -110,6 +124,38 @@ export async function add(deps: LineDeps, caller: Caller, request: AddLineReques
     }
     throw error
   }
+}
+
+/**
+ * Buys or ports a number and records it as a new, unassigned Line. With an `Idempotency-Key` the
+ * Line and the key are written in one transaction, so a repeat of the same request answers with the
+ * stored Line (`replayed`) and does not buy or port again.
+ */
+export async function add(
+  deps: LineDeps,
+  caller: Caller,
+  request: AddLineRequest,
+  idempotencyKey?: string
+): Promise<IdempotentAnswer<201, Line>> {
+  requireAdmin(caller)
+  if (idempotencyKey === undefined) {
+    return { status: 201, body: await buyAndRecord(deps, caller, request), replayed: false }
+  }
+  return deps.idempotency.withOrganization(caller.organizationId, (scope) =>
+    idempotent(
+      deps,
+      scope,
+      caller,
+      {
+        key: idempotencyKey,
+        route: ADD_LINE_ROUTE,
+        request,
+        status: 201,
+        response: lineSchema,
+      },
+      () => buyAndRecord(deps, caller, request, scope)
+    )
+  )
 }
 
 const sameAssignment = (a: LineAssignment, b: LineAssignment): boolean =>

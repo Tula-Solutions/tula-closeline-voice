@@ -1,5 +1,6 @@
 import type { Line, LineAssignment, LineState, lineCursorSchema } from 'tula-closeline-contract'
 import type { z } from 'zod'
+import type { IdempotencyScope } from '~/ports/idempotency-store'
 
 /** The position after which the next page of Lines starts. */
 export type LineCursor = z.infer<typeof lineCursorSchema>
@@ -38,8 +39,12 @@ export class NumberTakenError extends Error {
  * that Organization's rows only: another Organization's Line is `undefined`, never an error.
  */
 export type LineStore = {
-  /** Creates a Line, unassigned; rejects with {@link NumberTakenError} when the number is live. */
-  insert: (organizationId: string, line: NewLine) => Promise<StoredLine>
+  /**
+   * Creates a Line, unassigned; rejects with {@link NumberTakenError} when the number is live.
+   * With `within`, the insert joins that idempotency transaction, so the Line and its key commit
+   * or roll back together.
+   */
+  insert: (organizationId: string, line: NewLine, within?: IdempotencyScope) => Promise<StoredLine>
   /** The Lines after the cursor, newest first by `(createdAt, id)`, at most `limit`. */
   list: (organizationId: string, query: LineListQuery) => Promise<StoredLine[]>
   /** One Line, or `undefined` when this Organization has none with that id. */

@@ -12,6 +12,7 @@ import {
   type TokenVerifier,
 } from 'tula-closeline-kit'
 import { createMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
+import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import {
   createUnconfiguredNumberProvisioner,
@@ -20,6 +21,7 @@ import {
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import type { NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
@@ -51,6 +53,8 @@ export type Container = {
   tokenVerifier: TokenVerifier
   /** The Lines of every Organization; the only way a module reaches the `voice` schema. */
   lines: LineStore
+  /** The stored answers of requests sent with an `Idempotency-Key`, per Organization and user. */
+  idempotency: IdempotencyStore
   /** Buys, ports and releases numbers at the telephony provider. */
   numbers: NumberProvisioner
   /** Teams and Reps of an Organization, held by the core service. */
@@ -119,6 +123,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
       clock: systemClock,
     }),
     lines: createPostgresLineStore(database.db),
+    idempotency: createPostgresIdempotencyStore(database.db),
     // The in-memory provisioner is local-only (the env schema rejects it elsewhere); a deployment
     // on `twilio` has no number adapter yet, so buying, porting and releasing fail closed.
     numbers:

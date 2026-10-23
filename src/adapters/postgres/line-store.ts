@@ -1,7 +1,8 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm'
 import { lineSchema } from 'tula-closeline-contract'
-import { type Database, withOrganization } from 'tula-closeline-db'
+import { type Database, type Transaction, withOrganization } from 'tula-closeline-db'
 import { voiceLines } from 'tula-closeline-db/schema'
+import { transactionOf } from '~/adapters/postgres/idempotency-store'
 import { type LineStore, NumberTakenError, type StoredLine } from '~/ports/line-store'
 
 type Row = typeof voiceLines.$inferSelect
@@ -54,23 +55,28 @@ export function createPostgresLineStore(db: Database): LineStore {
     and(eq(voiceLines.organizationId, organizationId), eq(voiceLines.id, id))
 
   return {
-    async insert(organizationId, line) {
+    async insert(organizationId, line, within) {
+      const write = (tx: Transaction) =>
+        tx
+          .insert(voiceLines)
+          .values({
+            id: line.id,
+            organizationId,
+            number: line.number,
+            country: line.country,
+            label: line.label,
+            state: line.state,
+            providerSid: line.providerSid,
+            createdAt: line.createdAt,
+          })
+          .returning()
       try {
-        const [row] = await withOrganization(db, organizationId, (tx) =>
-          tx
-            .insert(voiceLines)
-            .values({
-              id: line.id,
-              organizationId,
-              number: line.number,
-              country: line.country,
-              label: line.label,
-              state: line.state,
-              providerSid: line.providerSid,
-              createdAt: line.createdAt,
-            })
-            .returning()
-        )
+        // Inside an idempotency transaction the Line joins it; a failed insert aborts that
+        // transaction, which the caller then rolls back along with the key.
+        const joined = within === undefined ? undefined : transactionOf(within)
+        const [row] = await (joined === undefined
+          ? withOrganization(db, organizationId, write)
+          : write(joined))
         if (row === undefined) {
           throw new Error('insert returned no row')
         }

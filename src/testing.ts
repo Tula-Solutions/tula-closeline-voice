@@ -10,6 +10,10 @@ import {
   type TokenVerifier,
 } from 'tula-closeline-kit'
 import { createTestJwks, createTestKeyPair, mintTestToken } from 'tula-closeline-kit/testing'
+import {
+  createMemoryIdempotencyStore,
+  type MemoryIdempotencyStore,
+} from '~/adapters/memory/idempotency-store'
 import { createMemoryLineStore } from '~/adapters/memory/line-store'
 import {
   createMemoryNumberProvisioner,
@@ -47,6 +51,7 @@ const REJECTING_VERIFIER: TokenVerifier = {
 /** The container plus the observable side effects a test asserts on. */
 export type TestDeps = Container & {
   clock: FixedClock
+  idempotency: MemoryIdempotencyStore
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
   /** Every JSON log line written, in order. */
@@ -82,6 +87,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     clock: createFixedClock('2026-01-01T00:00:00Z'),
     tokenVerifier: overrides.tokenVerifier ?? REJECTING_VERIFIER,
     lines: createMemoryLineStore(),
+    idempotency: createMemoryIdempotencyStore(),
     numbers: createMemoryNumberProvisioner(),
     directory: createMemoryOrganizationDirectory(),
     close: async () => undefined,

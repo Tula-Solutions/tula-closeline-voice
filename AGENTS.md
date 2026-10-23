@@ -44,7 +44,9 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   Add, assign and release are Owner and Admin; list and read are every role. Every tenant query
   goes through `withOrganization` (`src/adapters/postgres/line-store.ts`). `providerSid` never
   leaves the service.
-- Ports (`src/ports/`): `LineStore`, `NumberProvisioner` (buy, port, release a number),
+- Ports (`src/ports/`): `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
+  requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
+  transaction, see `src/modules/idempotency/service.ts`), `NumberProvisioner` (buy, port, release a number),
   `OrganizationDirectory` (Teams and Reps, owned by core). Memory adapters are in
   `src/adapters/memory/`; `src/adapters/unconfigured/` fails closed with `server.unavailable`
   until the Twilio number adapter and the core lookup exist.

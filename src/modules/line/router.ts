@@ -9,7 +9,11 @@ import {
 } from 'tula-closeline-contract'
 import type { Container } from '~/container'
 import { type AuthedEnv, callerOf } from '~/http/auth'
-import { errorResponse } from '~/http/responses'
+import {
+  errorResponse,
+  errorResponseWithRetryAfter,
+  optionalIdempotencyKeyHeader,
+} from '~/http/responses'
 import { createRouter } from '~/http/router'
 import { PUBLIC_SECURITY } from '~/http/security'
 import * as Lines from './service'
@@ -47,17 +51,32 @@ const add = createRoute({
   path: '/lines',
   tags: ['lines'],
   summary: 'Add a Line by buying or porting a number',
-  description: 'Owner and Admin only. A port is `porting` until the carrier completes it.',
+  description:
+    'Owner and Admin only. A port is `porting` until the carrier completes it. Send an ' +
+    '`Idempotency-Key` to make a retry safe: the same key with the same request answers 200 with ' +
+    'the first Line and buys or ports nothing again, for 24 hours.',
   security,
   request: {
+    headers: optionalIdempotencyKeyHeader(
+      'A client-chosen key. The same key with the same request returns the first Line and does ' +
+        'nothing again, for 24 hours; the same key with another request is ' +
+        'request.idempotency_key_reused (422); the same key while the first request is still ' +
+        'running is request.idempotency_in_progress (409, with Retry-After). Without it the call ' +
+        'is not protected against being repeated.'
+    ),
     body: { required: true, content: { 'application/json': { schema: addLineRequestSchema } } },
   },
   responses: {
+    200: lineBody('The Line this Idempotency-Key created earlier; nothing was bought or ported.'),
     201: lineBody('The new Line.'),
     400: errorResponse('request.invalid'),
     401: unauthorized,
     403: errorResponse('auth.forbidden'),
-    409: errorResponse('line.number_unavailable'),
+    409: errorResponseWithRetryAfter(
+      'line.number_unavailable, or request.idempotency_in_progress while the first request with ' +
+        'this Idempotency-Key is still running (send it again after Retry-After).'
+    ),
+    422: errorResponse('request.idempotency_key_reused: the key was used for another request.'),
     500: serverError,
   },
 })
@@ -129,9 +148,15 @@ export function createLineRouter(container: Container): OpenAPIHono<AuthedEnv> {
   router.openapi(list, async (c) =>
     c.json(await Lines.list(container, callerOf(c), c.req.valid('query')), 200)
   )
-  router.openapi(add, async (c) =>
-    c.json(await Lines.add(container, callerOf(c), c.req.valid('json')), 201)
-  )
+  router.openapi(add, async (c) => {
+    const answer = await Lines.add(
+      container,
+      callerOf(c),
+      c.req.valid('json'),
+      c.req.valid('header')['idempotency-key']
+    )
+    return answer.replayed ? c.json(answer.body, 200) : c.json(answer.body, 201)
+  })
   router.openapi(read, async (c) =>
     c.json(await Lines.get(container, callerOf(c), c.req.valid('param').lineId), 200)
   )
