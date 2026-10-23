@@ -348,7 +348,7 @@
             }
           },
           "404": {
-            "description": "The Organization has no such Call.",
+            "description": "call.provider_call_not_found: the Organization has no such Call.",
             "content": {
               "application/json": {
                 "schema": {
@@ -573,7 +573,7 @@
             }
           },
           "404": {
-            "description": "The Organization has no such Call.",
+            "description": "call.provider_call_not_found: the Organization has no such Call.",
             "content": {
               "application/json": {
                 "schema": {

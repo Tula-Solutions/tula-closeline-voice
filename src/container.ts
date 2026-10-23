@@ -18,6 +18,7 @@ import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-p
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
+import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
 import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import {
   createUnconfiguredNumberProvisioner,
@@ -31,6 +32,7 @@ import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
+import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
 export type ReadinessCheck = {
@@ -71,6 +73,8 @@ export type Container = {
   callEvents: CallEventStore
   /** Teams and Reps of an Organization, held by the core service. */
   directory: OrganizationDirectory
+  /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
+  twilioPurge?: TwilioPurgeSource
   /** Releases the database connections; safe to call more than once. */
   close: () => Promise<void>
   /** Probes run by `/readyz`: the database. */
@@ -184,6 +188,9 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     // Teams and Reps live in core's schema, which this service never reads; the link to core
     // arrives with its own ticket, and until then naming a Team or Rep fails closed.
     directory: createUnconfiguredOrganizationDirectory(),
+    ...(env.TELEPHONY_PROVIDER === 'twilio'
+      ? { twilioPurge: createPostgresTwilioPurgeSource(database.db) }
+      : {}),
     close: database.close,
     readinessChecks: [
       {

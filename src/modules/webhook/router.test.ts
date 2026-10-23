@@ -131,6 +131,9 @@ describe('POST /webhooks/twilio/status', () => {
     )
     const response = await send(request)
     expect(response.status).toBe(404)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      'call.provider_call_not_found'
+    )
     expect(t.deps.callEvents.recorded).toHaveLength(0)
   })
 

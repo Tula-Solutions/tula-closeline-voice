@@ -17,7 +17,16 @@ test('configuration falls back to defaults for everything but the environment', 
     AUTH_AUDIENCE: 'closeline',
     AWS_REGION: 'us-east-1',
     TELEPHONY_PROVIDER: 'memory',
+    TWILIO_PURGE_INTERVAL_MS: 900_000,
+    TWILIO_PURGE_MAX_ORGANIZATIONS: 200,
   })
+})
+
+test('the purge interval and Organization cap are bounded', () => {
+  const at = (extra: Record<string, string>) => loadEnv({ ENVIRONMENT: 'local', ...extra })
+  expect(at({ TWILIO_PURGE_INTERVAL_MS: '60000' }).TWILIO_PURGE_INTERVAL_MS).toBe(60_000)
+  expect(() => at({ TWILIO_PURGE_INTERVAL_MS: '10' })).toThrow()
+  expect(() => at({ TWILIO_PURGE_MAX_ORGANIZATIONS: '0' })).toThrow()
 })
 
 const DEPLOYED = {

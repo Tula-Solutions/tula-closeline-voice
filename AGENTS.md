@@ -55,7 +55,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   `CallEventStore` appends one `provider_callback` row per event id, duplicates change nothing).
   `src/modules/softphone/` mints the short-lived browser token (`POST /v1/softphone/token`, Rep and
   Organization only; `OrganizationDirectory.membershipOf`). `telephony` is built in `container.ts`:
-  the kit Twilio adapter over the Postgres `TwilioStore` (`src/adapters/postgres/twilio-store.ts`; rows carry `expires_at`; `purgeExpiredTwilio` in `twilio-purge.ts` removes one Organization's expired rows in bounded batches, but nothing schedules it: voice cannot list Organizations with expired rows yet).
+  the kit Twilio adapter over the Postgres `TwilioStore` (`src/adapters/postgres/twilio-store.ts`; rows carry `expires_at`; `purgeExpiredTwilio` in `twilio-purge.ts` removes one Organization's expired rows in bounded batches). With `TELEPHONY_PROVIDER=twilio`, `server.ts` starts the scheduled purge (`src/modules/purge/`: `schedule.ts` runs a jittered, non-overlapping timer; `twilio-purge-job.ts` pages `voice.twilio_orgs_with_expired` through the `TwilioPurgeSource` port, caps each run, and resumes from an in-memory cursor so failing Organizations cannot starve the rest). Shutdown waits for the current Organization, not the whole run.
 - Log errors with `describeError`, never the raw error.
 - `openapi.json` is generated: `bun run openapi`; `verify` fails if it is stale. No database yet:
   the voice schema comes from `tula-closeline-db`; migrations are never made here.
@@ -67,7 +67,9 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 `REGION`, `DATABASE_URL`, `AUTH_JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AWS_REGION`,
 `QUEUE_URL`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`), and with `twilio` the keys
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
-`TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local). The deployment keys have
+`TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local),
+and the purge schedule keys `TWILIO_PURGE_INTERVAL_MS` (default 900000) and
+`TWILIO_PURGE_MAX_ORGANIZATIONS` (default 200). The deployment keys have
 local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_ENDPOINT` and
 `STORAGE_ENDPOINT` are local-only. Add a key in both files.
 
