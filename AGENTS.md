@@ -14,6 +14,7 @@ from the hub (`tula-closeline`). This file holds only what is specific to this r
 | `bun run verify` | the full gate, exactly what CI runs |
 | `bun run verify:changed` | the quick gate the Stop hook runs |
 | `bun test` | tests |
+| `bun run test:integration` | the `*.integration.ts` suites against compose Postgres (`docker compose up -d --wait`; `POSTGRES_PORT` moves it); not part of `verify` |
 | `bun run bench` | the benchmarks and their budgets |
 | `bun run openapi` | rewrite `openapi.json` after a route or schema change |
 
@@ -23,8 +24,9 @@ Other scripts are in `package.json`.
 
 The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>/`.
 
-- `src/container.ts` is the only composition root: env, kit logger, clock, readiness checks,
-  `lifecycle`, and `reportError`. `src/testing.ts` builds the same container from in-memory doubles.
+- `src/container.ts` is the only composition root: env, kit logger, clock, token verifier, the
+  Line store (Postgres, over `createDb`), number provisioner, organization directory, readiness
+  checks (`database`), `lifecycle`, `reportError`, and `close`. `src/testing.ts` builds the same container from in-memory doubles.
 - `reportError(error, context)` is the one seam for unexpected errors (5xx only). It logs through
   the kit today; the error tracker is wired in there and nowhere else. It must not throw. Call
   `reportSafely`, never it directly.
@@ -37,14 +39,27 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 - Shutdown (`src/shutdown.ts`): on SIGTERM `/readyz` goes 503, `SHUTDOWN_GRACE_MS` passes, the
   server stops accepting, `SHUTDOWN_TIMEOUT_MS` bounds the drain, then it exits. A second signal
   over a second later exits at once.
+- `src/modules/line/` is the Lines module (router, service). Routes sit under `/v1` behind
+  `authenticate` (`src/http/auth.ts`); the Organization and role come from the verified token only.
+  Add, assign and release are Owner and Admin; list and read are every role. Every tenant query
+  goes through `withOrganization` (`src/adapters/postgres/line-store.ts`). `providerSid` never
+  leaves the service.
+- Ports (`src/ports/`): `LineStore`, `NumberProvisioner` (buy, port, release a number),
+  `OrganizationDirectory` (Teams and Reps, owned by core). Memory adapters are in
+  `src/adapters/memory/`; `src/adapters/unconfigured/` fails closed with `server.unavailable`
+  until the Twilio number adapter and the core lookup exist.
 - Log errors with `describeError`, never the raw error.
 - `openapi.json` is generated: `bun run openapi`; `verify` fails if it is stale. No database yet:
-  add `tula-closeline-db` when the first table is needed.
+  the voice schema comes from `tula-closeline-db`; migrations are never made here.
 
 ## Env keys (`src/env.ts`, mirrored in `.env.example`)
 
 `ENVIRONMENT` (required, no default), `PORT`, `LOG_LEVEL`, `READINESS_TIMEOUT_MS`,
-`SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_GRACE_MS`, `MAX_REQUEST_BODY_BYTES`. Add a key in both files.
+`SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_GRACE_MS`, `MAX_REQUEST_BODY_BYTES`, and the deployment keys
+`REGION`, `DATABASE_URL`, `AUTH_JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AWS_REGION`,
+`QUEUE_URL`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`). The deployment keys have
+local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_ENDPOINT` and
+`STORAGE_ENDPOINT` are local-only. Add a key in both files.
 
 ## Hot paths
 

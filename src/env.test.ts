@@ -10,7 +10,66 @@ test('configuration falls back to defaults for everything but the environment', 
     SHUTDOWN_TIMEOUT_MS: 10_000,
     SHUTDOWN_GRACE_MS: 5_000,
     MAX_REQUEST_BODY_BYTES: 1_048_576,
+    REGION: 'us',
+    DATABASE_URL: 'postgres://closeline_voice:closeline_voice_local@127.0.0.1:5432/closeline',
+    AUTH_JWKS_URL: 'http://127.0.0.1:3001/.well-known/jwks.json',
+    AUTH_ISSUER: 'http://127.0.0.1:3001',
+    AUTH_AUDIENCE: 'closeline',
+    AWS_REGION: 'us-east-1',
+    TELEPHONY_PROVIDER: 'memory',
   })
+})
+
+const DEPLOYED = {
+  REGION: 'us',
+  DATABASE_URL: 'postgres://closeline_voice:secret@db.internal:5432/closeline',
+  AUTH_JWKS_URL: 'https://auth.example/.well-known/jwks.json',
+  AUTH_ISSUER: 'https://auth.example',
+  AUTH_AUDIENCE: 'closeline',
+  AWS_REGION: 'us-east-1',
+  QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/voice-events',
+  STORAGE_BUCKET: 'closeline-voice-recordings',
+  TELEPHONY_PROVIDER: 'twilio',
+}
+
+test('a deployed environment accepts the full set of keys', () => {
+  expect(loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED })).toMatchObject({
+    ENVIRONMENT: 'prod',
+    REGION: 'us',
+    TELEPHONY_PROVIDER: 'twilio',
+  })
+})
+
+test.each(Object.keys(DEPLOYED))('a deployed environment without %s fails at boot', (key) => {
+  const source: Record<string, string> = { ENVIRONMENT: 'staging', ...DEPLOYED }
+  delete source[key]
+  expect(() => loadEnv(source)).toThrow(key)
+})
+
+test('the in-memory telephony provider is accepted only when local', () => {
+  expect(() => loadEnv({ ENVIRONMENT: 'dev', ...DEPLOYED, TELEPHONY_PROVIDER: 'memory' })).toThrow(
+    'TELEPHONY_PROVIDER'
+  )
+})
+
+test('local stand-in endpoints are accepted only when local and need their resource', () => {
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, QUEUE_ENDPOINT: 'http://127.0.0.1:9324' })
+  ).toThrow('QUEUE_ENDPOINT')
+  expect(() => loadEnv({ ENVIRONMENT: 'local', QUEUE_ENDPOINT: 'http://127.0.0.1:9324' })).toThrow(
+    'QUEUE_URL'
+  )
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, STORAGE_ENDPOINT: 'http://127.0.0.1:9090' })
+  ).toThrow('STORAGE_ENDPOINT')
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'local', STORAGE_ENDPOINT: 'http://127.0.0.1:9090' })
+  ).toThrow('STORAGE_BUCKET')
+})
+
+test('an unknown Region and a non-postgres database URL are rejected', () => {
+  expect(() => loadEnv({ ENVIRONMENT: 'local', REGION: 'mars' })).toThrow()
+  expect(() => loadEnv({ ENVIRONMENT: 'local', DATABASE_URL: 'mysql://x' })).toThrow()
 })
 
 test('a deploy without ENVIRONMENT fails at boot instead of running as local', () => {

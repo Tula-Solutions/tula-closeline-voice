@@ -1,7 +1,32 @@
+import { regionSchema } from 'tula-closeline-contract'
 import { z } from 'zod'
 
 /** The most grace plus drain may add up to, so an orchestrator's kill window is not outlasted. */
 const MAX_SHUTDOWN_TOTAL_MS = 60_000
+
+/** The Region, database login, token issuer and AWS Region a `local` run falls back to. */
+const LOCAL_DEFAULTS = {
+  REGION: 'us',
+  DATABASE_URL: 'postgres://closeline_voice:closeline_voice_local@127.0.0.1:5432/closeline',
+  AUTH_JWKS_URL: 'http://127.0.0.1:3001/.well-known/jwks.json',
+  AUTH_ISSUER: 'http://127.0.0.1:3001',
+  AUTH_AUDIENCE: 'closeline',
+  AWS_REGION: 'us-east-1',
+  TELEPHONY_PROVIDER: 'memory',
+} as const
+
+/** The keys that must be set in every environment but `local`, where they have defaults. */
+const REQUIRED_OUTSIDE_LOCAL = [
+  'REGION',
+  'DATABASE_URL',
+  'AUTH_JWKS_URL',
+  'AUTH_ISSUER',
+  'AUTH_AUDIENCE',
+  'AWS_REGION',
+  'QUEUE_URL',
+  'STORAGE_BUCKET',
+  'TELEPHONY_PROVIDER',
+] as const
 
 const schema = z
   .object({
@@ -17,10 +42,106 @@ const schema = z
     SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
     /** The largest request body accepted, in bytes; anything bigger is a 413. */
     MAX_REQUEST_BODY_BYTES: z.coerce.number().int().min(1).max(104_857_600).default(1_048_576),
+    /** The Region this deployment serves; every Organization it holds lives in it. */
+    REGION: regionSchema.optional(),
+    /** Postgres connection string of the `closeline_voice` login. It carries a password: never log it. */
+    DATABASE_URL: z
+      .string()
+      .regex(/^postgres(ql)?:\/\//, 'DATABASE_URL must be a postgres:// connection string')
+      .optional(),
+    /** Where the auth service publishes its signing keys (https; http only when local). */
+    AUTH_JWKS_URL: z.url().optional(),
+    /** The `iss` every access token must carry. */
+    AUTH_ISSUER: z.string().min(1).max(2_048).optional(),
+    /** The `aud` every access token must carry. */
+    AUTH_AUDIENCE: z.string().min(1).max(2_048).optional(),
+    /** The AWS Region of the queue and the bucket (not the Closeline Region above). */
+    AWS_REGION: z.string().min(1).max(64).optional(),
+    /** The event queue's URL. Required outside `local`. */
+    QUEUE_URL: z.url().max(2_048).optional(),
+    /** Where ElasticMQ listens, for a local run against it. Accepted only when `local`. */
+    QUEUE_ENDPOINT: z.url().max(2_048).optional(),
+    /** The bucket holding Call recordings. Required outside `local`. */
+    STORAGE_BUCKET: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, 'STORAGE_BUCKET must be a valid bucket name')
+      .optional(),
+    /** Where S3Mock listens, for a local run against it. Accepted only when `local`. */
+    STORAGE_ENDPOINT: z.url().max(2_048).optional(),
+    /**
+     * The telephony provider. `memory` is the in-process stand-in and is accepted only when
+     * `local`; `twilio` is the real one and fails closed until its adapter is configured.
+     */
+    TELEPHONY_PROVIDER: z.enum(['memory', 'twilio']).optional(),
   })
   .refine((env) => env.SHUTDOWN_GRACE_MS + env.SHUTDOWN_TIMEOUT_MS <= MAX_SHUTDOWN_TOTAL_MS, {
     message: `SHUTDOWN_GRACE_MS plus SHUTDOWN_TIMEOUT_MS must not exceed ${MAX_SHUTDOWN_TOTAL_MS} ms in total`,
     path: ['SHUTDOWN_TIMEOUT_MS'],
+  })
+  .superRefine((env, context) => {
+    // Messages name the key and the rule, never the value: a URL can carry credentials.
+    if (env.ENVIRONMENT !== 'local') {
+      for (const key of REQUIRED_OUTSIDE_LOCAL) {
+        if (env[key] === undefined) {
+          context.addIssue({ code: 'custom', path: [key], message: `${key} is required` })
+        }
+      }
+      if (env.TELEPHONY_PROVIDER === 'memory') {
+        context.addIssue({
+          code: 'custom',
+          path: ['TELEPHONY_PROVIDER'],
+          message: 'TELEPHONY_PROVIDER memory is accepted only when ENVIRONMENT is local',
+        })
+      }
+    }
+    for (const [endpoint, owner] of [
+      ['QUEUE_ENDPOINT', 'QUEUE_URL'],
+      ['STORAGE_ENDPOINT', 'STORAGE_BUCKET'],
+    ] as const) {
+      if (env[endpoint] === undefined) {
+        continue
+      }
+      if (env.ENVIRONMENT !== 'local') {
+        context.addIssue({
+          code: 'custom',
+          path: [endpoint],
+          message: `${endpoint} is accepted only when ENVIRONMENT is local`,
+        })
+      }
+      if (env[owner] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: [endpoint],
+          message: `${endpoint} needs ${owner}`,
+        })
+      }
+    }
+  })
+  .transform((env) => {
+    // Outside local the superRefine has already rejected a missing key; only a local run falls back.
+    const local = env.ENVIRONMENT === 'local'
+    const need = <T>(value: T | undefined, fallback: T): T => {
+      if (value !== undefined) {
+        return value
+      }
+      if (local) {
+        return fallback
+      }
+      throw new Error('a required key was not checked')
+    }
+    return {
+      ...env,
+      REGION: need(env.REGION, LOCAL_DEFAULTS.REGION),
+      DATABASE_URL: need(env.DATABASE_URL, LOCAL_DEFAULTS.DATABASE_URL),
+      AUTH_JWKS_URL: need(env.AUTH_JWKS_URL, LOCAL_DEFAULTS.AUTH_JWKS_URL),
+      AUTH_ISSUER: need(env.AUTH_ISSUER, LOCAL_DEFAULTS.AUTH_ISSUER),
+      AUTH_AUDIENCE: need(env.AUTH_AUDIENCE, LOCAL_DEFAULTS.AUTH_AUDIENCE),
+      AWS_REGION: need(env.AWS_REGION, LOCAL_DEFAULTS.AWS_REGION),
+      TELEPHONY_PROVIDER: need<'memory' | 'twilio'>(
+        env.TELEPHONY_PROVIDER,
+        LOCAL_DEFAULTS.TELEPHONY_PROVIDER
+      ),
+    }
   })
 
 /** The validated process configuration. */
