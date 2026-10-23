@@ -209,4 +209,26 @@ describe('adding a Line with an Idempotency-Key', () => {
     // Another Organization's expired key is not touched by this one's purge.
     expect(t.deps.idempotency.count(other.organizationId)).toBe(1)
   })
+
+  it('gives the number back when the key cannot be stored after the purchase', async () => {
+    const released: string[] = []
+    const { release } = t.deps.numbers
+    t.deps.numbers.release = async (sid) => {
+      released.push(sid)
+      return release(sid)
+    }
+    const { withOrganization } = t.deps.idempotency
+    t.deps.idempotency.withOrganization = (organizationId, fn) =>
+      withOrganization(organizationId, (scope) =>
+        fn({
+          ...scope,
+          complete: async () => {
+            throw new Error('the database went away')
+          },
+        })
+      )
+    const failed = await post(admin, buyBody, { 'idempotency-key': KEY })
+    expect(failed.status).toBe(500)
+    expect(released).toHaveLength(1)
+  })
 })

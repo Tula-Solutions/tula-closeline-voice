@@ -86,11 +86,16 @@ export async function get(deps: LineDeps, caller: Caller, id: Line['id']): Promi
 /** The route name an add-Line `Idempotency-Key` is stored under. */
 export const ADD_LINE_ROUTE = 'lines.add'
 
-/** Buys or ports a number and records it as a new, unassigned Line, inside `within` when given. */
+/**
+ * Buys or ports a number and records it as a new, unassigned Line, inside `within` when given.
+ * `held` is told the provider's id as soon as a number is paid for, so the caller can give it back
+ * if anything after that fails.
+ */
 async function buyAndRecord(
   deps: LineDeps,
   caller: Caller,
   request: AddLineRequest,
+  held: { providerSid: string | null },
   within?: IdempotencyScope
 ): Promise<Line> {
   let provisioned: ProvisionedNumber
@@ -99,6 +104,7 @@ async function buyAndRecord(
   } else {
     provisioned = await deps.numbers.port(request.number)
   }
+  held.providerSid = provisioned.providerSid
   try {
     const stored = await deps.lines.insert(
       caller.organizationId,
@@ -115,10 +121,6 @@ async function buyAndRecord(
     )
     return toLine(stored)
   } catch (error) {
-    // The number is paid for but no Line holds it: give it back so nothing is left behind.
-    await deps.numbers.release(provisioned.providerSid).catch((releaseError: unknown) => {
-      deps.logger.error('line.add.release_failed', describeError(releaseError))
-    })
     if (error instanceof NumberTakenError) {
       throw domainError(VOICE_ERRORS['line.number_unavailable'])
     }
@@ -138,24 +140,40 @@ export async function add(
   idempotencyKey?: string
 ): Promise<IdempotentAnswer<201, Line>> {
   requireAdmin(caller)
-  if (idempotencyKey === undefined) {
-    return { status: 201, body: await buyAndRecord(deps, caller, request), replayed: false }
-  }
-  return deps.idempotency.withOrganization(caller.organizationId, (scope) =>
-    idempotent(
-      deps,
-      scope,
-      caller,
-      {
-        key: idempotencyKey,
-        route: ADD_LINE_ROUTE,
-        request,
+  const held: { providerSid: string | null } = { providerSid: null }
+  try {
+    if (idempotencyKey === undefined) {
+      return {
         status: 201,
-        response: lineSchema,
-      },
-      () => buyAndRecord(deps, caller, request, scope)
+        body: await buyAndRecord(deps, caller, request, held),
+        replayed: false,
+      }
+    }
+    return await deps.idempotency.withOrganization(caller.organizationId, (scope) =>
+      idempotent(
+        deps,
+        scope,
+        caller,
+        {
+          key: idempotencyKey,
+          route: ADD_LINE_ROUTE,
+          request,
+          status: 201,
+          response: lineSchema,
+        },
+        () => buyAndRecord(deps, caller, request, held, scope)
+      )
     )
-  )
+  } catch (error) {
+    // Anything failing after the purchase (the Line, the key, the commit) rolls the Line back:
+    // the number is paid for but no Line holds it, so give it back and nothing is left behind.
+    if (held.providerSid !== null) {
+      await deps.numbers.release(held.providerSid).catch((releaseError: unknown) => {
+        deps.logger.error('line.add.release_failed', describeError(releaseError))
+      })
+    }
+    throw error
+  }
 }
 
 const sameAssignment = (a: LineAssignment, b: LineAssignment): boolean =>
