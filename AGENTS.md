@@ -55,7 +55,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   `CallEventStore` appends one `provider_callback` row per event id, duplicates change nothing).
   `src/modules/softphone/` mints the short-lived browser token (`POST /v1/softphone/token`, Rep and
   Organization only; `OrganizationDirectory.membershipOf`). `telephony` is built in `container.ts`:
-  the kit Twilio adapter in local/dev, fail-closed in staging/prod until a durable `TwilioStore`.
+  the kit Twilio adapter over the Postgres `TwilioStore` (`src/adapters/postgres/twilio-store.ts`; rows carry `expires_at`, the purge job is not built yet).
 - Log errors with `describeError`, never the raw error.
 - `openapi.json` is generated: `bun run openapi`; `verify` fails if it is stale. No database yet:
   the voice schema comes from `tula-closeline-db`; migrations are never made here.
