@@ -11,7 +11,7 @@ import {
   systemClock,
   type TokenVerifier,
 } from 'tula-closeline-kit'
-import { createMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
+import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import {
@@ -128,7 +128,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     // on `twilio` has no number adapter yet, so buying, porting and releasing fail closed.
     numbers:
       env.TELEPHONY_PROVIDER === 'memory'
-        ? createMemoryNumberProvisioner()
+        ? createRunningMemoryNumberProvisioner()
         : createUnconfiguredNumberProvisioner(),
     // Teams and Reps live in core's schema, which this service never reads; the link to core
     // arrives with its own ticket, and until then naming a Team or Rep fails closed.
