@@ -129,13 +129,15 @@ describe('adding a Line', () => {
     const real = t.deps.numbers.buy
     t.deps.numbers.buy = async (request, signal) => {
       const bought = await real(request, signal)
-      await new Promise((resolve) => setTimeout(resolve, 40))
+      await new Promise((resolve) => setTimeout(resolve, 80))
       return bought
     }
     const { status, body } = await buy(admin)
     expect(status).toBe(503)
     expect(codeOf(body)).toBe('server.unavailable')
-    await Bun.sleep(60)
+    for (let i = 0; i < 100 && t.deps.numbers.released.length === 0; i += 1) {
+      await Bun.sleep(20)
+    }
     expect(t.deps.numbers.released).toEqual(['mem_000001'])
   })
 
@@ -349,6 +351,27 @@ describe('releasing a Line', () => {
     expect((retry.body as LineBody).state).toBe('released')
     expect(t.deps.numbers.released).toHaveLength(1)
     await t.call(admin, 'POST', `/lines/${line.id}/release`)
+    expect(t.deps.numbers.released).toHaveLength(1)
+  })
+
+  it('answers server.unavailable when the provider never answers a release, then finishes on retry', async () => {
+    const line = (await buy(admin)).body as LineBody
+    t.deps.numberTimeoutMs = 20
+    const real = t.deps.numbers.release
+    let hang = true
+    t.deps.numbers.release = (sid, signal) =>
+      hang
+        ? new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+          })
+        : real(sid, signal)
+    const first = await t.call(admin, 'POST', `/lines/${line.id}/release`)
+    expect(first.status).toBe(503)
+    expect(codeOf(first.body)).toBe('server.unavailable')
+    hang = false
+    const retry = await t.call(admin, 'POST', `/lines/${line.id}/release`)
+    expect(retry.status).toBe(200)
+    expect((retry.body as LineBody).state).toBe('released')
     expect(t.deps.numbers.released).toHaveLength(1)
   })
 

@@ -43,7 +43,6 @@ const list = createRoute({
     400: errorResponse('request.invalid: the query or the cursor is not valid.'),
     401: unauthorized,
     500: serverError,
-    503: errorResponse('server.unavailable: the telephony provider did not answer in time.'),
   },
 })
 
@@ -79,6 +78,7 @@ const add = createRoute({
     ),
     422: errorResponse('request.idempotency_key_reused: the key was used for another request.'),
     500: serverError,
+    503: errorResponse('server.unavailable: the telephony provider did not answer in time.'),
   },
 })
 
@@ -139,6 +139,7 @@ const release = createRoute({
     403: errorResponse('auth.forbidden'),
     404: errorResponse('line.not_found'),
     500: serverError,
+    503: errorResponse('server.unavailable: the telephony provider did not answer in time.'),
   },
 })
 
