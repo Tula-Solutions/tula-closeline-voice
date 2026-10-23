@@ -557,10 +557,25 @@
           "lines"
         ],
         "summary": "Add a Line by buying or porting a number",
-        "description": "Owner and Admin only. A port is `porting` until the carrier completes it.",
+        "description": "Owner and Admin only. A port is `porting` until the carrier completes it. Send an `Idempotency-Key` to make a retry safe: the same key with the same request answers 200 with the first Line and buys or ports nothing again, for 24 hours.",
         "security": [
           {
             "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$",
+              "description": "A client-chosen key. The same key with the same request returns the first Line and does nothing again, for 24 hours; the same key with another request is request.idempotency_key_reused (422); the same key while the first request is still running is request.idempotency_in_progress (409, with Retry-After). Without it the call is not protected against being repeated."
+            },
+            "required": false,
+            "description": "A client-chosen key. The same key with the same request returns the first Line and does nothing again, for 24 hours; the same key with another request is request.idempotency_key_reused (422); the same key while the first request is still running is request.idempotency_in_progress (409, with Retry-After). Without it the call is not protected against being repeated.",
+            "name": "idempotency-key",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -627,6 +642,127 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "The Line this Idempotency-Key created earlier; nothing was bought or ported.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^line_[0-9a-f]{32}$"
+                    },
+                    "number": {
+                      "type": "string",
+                      "pattern": "^\\+[1-9][0-9]{6,14}$"
+                    },
+                    "country": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{2}$"
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 1000
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "porting",
+                        "active",
+                        "released"
+                      ]
+                    },
+                    "assignment": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "unassigned"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "team"
+                              ]
+                            },
+                            "teamId": {
+                              "type": "string",
+                              "pattern": "^team_[0-9a-f]{32}$"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "teamId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "rep"
+                              ]
+                            },
+                            "membershipId": {
+                              "type": "string",
+                              "pattern": "^mem_[0-9a-f]{32}$"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "membershipId"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "releasedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "number",
+                    "country",
+                    "label",
+                    "state",
+                    "assignment",
+                    "createdAt",
+                    "releasedAt"
+                  ]
+                }
+              }
+            }
+          },
           "201": {
             "description": "The new Line.",
             "content": {
@@ -863,7 +999,56 @@
             }
           },
           "409": {
-            "description": "line.number_unavailable",
+            "description": "line.number_unavailable, or request.idempotency_in_progress while the first request with this Idempotency-Key is still running (send it again after Retry-After).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$",
+                  "description": "Whole seconds to wait before trying again."
+                },
+                "required": true,
+                "description": "Whole seconds to wait before trying again."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "request.idempotency_key_reused: the key was used for another request.",
             "content": {
               "application/json": {
                 "schema": {
