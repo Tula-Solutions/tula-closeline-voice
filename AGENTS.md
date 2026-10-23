@@ -50,6 +50,12 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   `OrganizationDirectory` (Teams and Reps, owned by core). Memory adapters are in
   `src/adapters/memory/`; `src/adapters/unconfigured/` fails closed with `server.unavailable`
   until the Twilio number adapter and the core lookup exist.
+- `src/modules/webhook/` receives Twilio status and recording callbacks (unauthenticated, verified by
+  `X-Twilio-Signature` over `WEBHOOK_BASE_URL` + path; bad signature is 403 and changes nothing;
+  `CallEventStore` appends one `provider_callback` row per event id, duplicates change nothing).
+  `src/modules/softphone/` mints the short-lived browser token (`POST /v1/softphone/token`, Rep and
+  Organization only; `OrganizationDirectory.membershipOf`). `telephony` is built in `container.ts`:
+  the kit Twilio adapter in local/dev, fail-closed in staging/prod until a durable `TwilioStore`.
 - Log errors with `describeError`, never the raw error.
 - `openapi.json` is generated: `bun run openapi`; `verify` fails if it is stale. No database yet:
   the voice schema comes from `tula-closeline-db`; migrations are never made here.
@@ -59,13 +65,17 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 `ENVIRONMENT` (required, no default), `PORT`, `LOG_LEVEL`, `READINESS_TIMEOUT_MS`,
 `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_GRACE_MS`, `MAX_REQUEST_BODY_BYTES`, and the deployment keys
 `REGION`, `DATABASE_URL`, `AUTH_JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AWS_REGION`,
-`QUEUE_URL`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`). The deployment keys have
+`QUEUE_URL`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`), and with `twilio` the keys
+`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
+`TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local). The deployment keys have
 local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_ENDPOINT` and
 `STORAGE_ENDPOINT` are local-only. Add a key in both files.
 
 ## Hot paths
 
-The per-request middleware stack (`createBaseApp`) and `/healthz`. Budgets are in `bench/`.
+The per-request middleware stack (`createBaseApp`) and `/healthz`, and the Twilio webhook handler
+(`Webhooks.receive`, `POST /webhooks/twilio/*`: signature check, then one idempotent insert; O(body
+size)). Budgets are in `bench/` (`bench/webhook.bench.test.ts`).
 
 A benchmark times `measure(operation)`: a warm-up, then several batches, gated on the fastest, so a
 noisy runner cannot fail it but a real regression (every batch slower) does. Budget is about 5x the

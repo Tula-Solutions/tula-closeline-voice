@@ -7,6 +7,8 @@ import { registerSecuritySchemes } from '~/http/security'
 import type { AppEnv } from '~/http/types'
 import { createHealthRouter } from '~/modules/health/router'
 import { createLineRouter } from '~/modules/line/router'
+import { createSoftphoneRouter } from '~/modules/softphone/router'
+import { createWebhookRouter } from '~/modules/webhook/router'
 import { serveOpenApi } from '~/openapi'
 
 /** Build the HTTP app from a container. Modules are mounted here as they are added. */
@@ -15,11 +17,14 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
 
   registerSecuritySchemes(app)
   app.route('/', createHealthRouter(container))
+  // The provider calls these without an access token; each request proves itself by signature.
+  app.route('/', createWebhookRouter(container))
 
   // Everything under /v1 requires a verified access token.
   const publicRoutes = createRouter<AuthedEnv>()
   publicRoutes.use('*', authenticate(container))
   publicRoutes.route('/', createLineRouter(container))
+  publicRoutes.route('/', createSoftphoneRouter(container))
   app.route('/v1', publicRoutes)
   serveOpenApi(app)
 
