@@ -231,4 +231,24 @@ describe('adding a Line with an Idempotency-Key', () => {
     expect(failed.status).toBe(500)
     expect(released).toHaveLength(1)
   })
+
+  it('logs a failed release and still answers with the original error', async () => {
+    t.deps.numbers.release = async () => {
+      throw new Error('provider refused the release')
+    }
+    const { withOrganization } = t.deps.idempotency
+    t.deps.idempotency.withOrganization = (organizationId, fn) =>
+      withOrganization(organizationId, (scope) =>
+        fn({
+          ...scope,
+          complete: async () => {
+            throw new Error('the database went away')
+          },
+        })
+      )
+    const failed = await post(admin, buyBody, { 'idempotency-key': KEY })
+    expect(failed.status).toBe(500)
+    expect((failed.body as ErrorBody).error.code).toBe('server.internal')
+    expect(t.deps.logLines.some((line) => line.includes('line.add.release_failed'))).toBe(true)
+  })
 })
