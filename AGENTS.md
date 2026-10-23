@@ -47,9 +47,12 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 - Ports (`src/ports/`): `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
   requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
   transaction, see `src/modules/idempotency/service.ts`), `NumberProvisioner` (buy, port, release a number),
-  `OrganizationDirectory` (Teams and Reps, owned by core). Memory adapters are in
-  `src/adapters/memory/`; `src/adapters/unconfigured/` fails closed with `server.unavailable`
-  until the Twilio number adapter and the core lookup exist.
+  `OrganizationDirectory` (Teams and Reps, owned by core; `src/adapters/core-http/` asks core's
+  `/internal/v1/directory/*` routes with a per-attempt timeout and bounded jittered retry on
+  network errors and 5xx, and any failure is `server.unavailable`; an Organization that is not
+  `active` has no Membership). Memory adapters are in `src/adapters/memory/`;
+  `src/adapters/unconfigured/` fails closed with `server.unavailable` until the Twilio number
+  adapter exists.
 - `src/modules/webhook/` receives Twilio status and recording callbacks (unauthenticated, verified by
   `X-Twilio-Signature` over `WEBHOOK_BASE_URL` + path; bad signature is 403 and changes nothing;
   `CallEventStore` appends one `provider_callback` row per event id, duplicates change nothing).
@@ -68,6 +71,9 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 `QUEUE_URL`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`), and with `twilio` the keys
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
 `TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local),
+`CORE_INTERNAL_URL` and `CORE_INTERNAL_TOKEN` (core's origin and the `Authorization: Bearer` secret
+in its `INTERNAL_API_TOKENS`; set together; required outside local, where unset means an empty
+in-memory directory),
 and the purge schedule keys `TWILIO_PURGE_INTERVAL_MS` (default 900000) and
 `TWILIO_PURGE_MAX_ORGANIZATIONS` (default 200). The deployment keys have
 local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_ENDPOINT` and

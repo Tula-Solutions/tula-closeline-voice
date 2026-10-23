@@ -14,7 +14,9 @@ import {
   type TokenVerifier,
 } from 'tula-closeline-kit'
 import { createMemoryTelephony } from 'tula-closeline-kit/testing'
+import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
+import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
@@ -142,6 +144,20 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
   })
 }
 
+/** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */
+function createDirectory(env: Env): OrganizationDirectory {
+  if (env.CORE_INTERNAL_URL && env.CORE_INTERNAL_TOKEN) {
+    return createCoreHttpOrganizationDirectory({
+      baseUrl: env.CORE_INTERNAL_URL,
+      token: env.CORE_INTERNAL_TOKEN,
+    })
+  }
+  // The env schema requires both keys outside `local`, so only a local run gets here.
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryOrganizationDirectory()
+    : createUnconfiguredOrganizationDirectory()
+}
+
 /** Options for {@link createContainer}. */
 export type ContainerOptions = {
   /** Where log lines go; defaults to stdout. */
@@ -185,9 +201,9 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: createTelephony(env, database.db),
     callEvents: createPostgresCallEventStore(database.db),
-    // Teams and Reps live in core's schema, which this service never reads; the link to core
-    // arrives with its own ticket, and until then naming a Team or Rep fails closed.
-    directory: createUnconfiguredOrganizationDirectory(),
+    // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
+    // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).
+    directory: createDirectory(env),
     ...(env.TELEPHONY_PROVIDER === 'twilio'
       ? { twilioPurge: createPostgresTwilioPurgeSource(database.db) }
       : {}),
