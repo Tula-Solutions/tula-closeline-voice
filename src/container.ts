@@ -1,14 +1,28 @@
+import { sql } from 'drizzle-orm'
 import type { RequestId } from 'tula-closeline-contract'
+import { createDb } from 'tula-closeline-db'
 import {
   type Clock,
   createLogger,
+  createRemoteKeySet,
+  createTokenVerifier,
   type LogDestination,
   type Logger,
   systemClock,
+  type TokenVerifier,
 } from 'tula-closeline-kit'
+import { createMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
+import { createPostgresLineStore } from '~/adapters/postgres/line-store'
+import {
+  createUnconfiguredNumberProvisioner,
+  createUnconfiguredOrganizationDirectory,
+} from '~/adapters/unconfigured'
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import type { LineStore } from '~/ports/line-store'
+import type { NumberProvisioner } from '~/ports/number-provisioner'
+import type { OrganizationDirectory } from '~/ports/organization-directory'
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
 export type ReadinessCheck = {
@@ -33,7 +47,17 @@ export type Container = {
   env: Env
   logger: Logger
   clock: Clock
-  /** Probes run by `/readyz`; empty until the service gains a dependency. */
+  /** Verifies access tokens offline against the auth service's published keys. */
+  tokenVerifier: TokenVerifier
+  /** The Lines of every Organization; the only way a module reaches the `voice` schema. */
+  lines: LineStore
+  /** Buys, ports and releases numbers at the telephony provider. */
+  numbers: NumberProvisioner
+  /** Teams and Reps of an Organization, held by the core service. */
+  directory: OrganizationDirectory
+  /** Releases the database connections; safe to call more than once. */
+  close: () => Promise<void>
+  /** Probes run by `/readyz`: the database. */
   readinessChecks: readonly ReadinessCheck[]
   /**
    * The one place unexpected errors go. It logs through the kit logger today; the error tracker is
@@ -76,11 +100,43 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     ...(options.logDestination ? { destination: options.logDestination } : {}),
   })
 
+  const database = createDb(env.DATABASE_URL)
+  const keys = createRemoteKeySet({
+    url: env.AUTH_JWKS_URL,
+    allowInsecureLocalhost: env.ENVIRONMENT === 'local',
+    clock: systemClock,
+    logger,
+  })
+
   return {
     env,
     logger,
     clock: systemClock,
-    readinessChecks: [],
+    tokenVerifier: createTokenVerifier({
+      issuer: env.AUTH_ISSUER,
+      audience: env.AUTH_AUDIENCE,
+      keys,
+      clock: systemClock,
+    }),
+    lines: createPostgresLineStore(database.db),
+    // The in-memory provisioner is local-only (the env schema rejects it elsewhere); a deployment
+    // on `twilio` has no number adapter yet, so buying, porting and releasing fail closed.
+    numbers:
+      env.TELEPHONY_PROVIDER === 'memory'
+        ? createMemoryNumberProvisioner()
+        : createUnconfiguredNumberProvisioner(),
+    // Teams and Reps live in core's schema, which this service never reads; the link to core
+    // arrives with its own ticket, and until then naming a Team or Rep fails closed.
+    directory: createUnconfiguredOrganizationDirectory(),
+    close: database.close,
+    readinessChecks: [
+      {
+        name: 'database',
+        run: async () => {
+          await database.db.execute(sql`select 1`)
+        },
+      },
+    ],
     lifecycle: { draining: false },
     reportError: (error, context) => {
       logger.error('unhandled error', { ...context, error: describeError(error) })
