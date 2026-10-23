@@ -38,6 +38,8 @@ const DEPLOYED = {
   AWS_REGION: 'us-east-1',
   QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/voice-events',
   STORAGE_BUCKET: 'closeline-voice-recordings',
+  CORE_INTERNAL_URL: 'https://core.internal',
+  CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
   TELEPHONY_PROVIDER: 'twilio',
   TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
   TWILIO_API_KEY_SID: `SK${'b'.repeat(32)}`,
@@ -59,6 +61,29 @@ test.each(Object.keys(DEPLOYED))('a deployed environment without %s fails at boo
   const source: Record<string, string> = { ENVIRONMENT: 'staging', ...DEPLOYED }
   delete source[key]
   expect(() => loadEnv(source)).toThrow(key)
+})
+
+test('the core link is optional when local but must be set together and be https elsewhere', () => {
+  expect(loadEnv({ ENVIRONMENT: 'local' }).CORE_INTERNAL_URL).toBeUndefined()
+  expect(
+    loadEnv({
+      ENVIRONMENT: 'local',
+      CORE_INTERNAL_URL: 'http://127.0.0.1:3002',
+      CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
+    }).CORE_INTERNAL_URL
+  ).toBe('http://127.0.0.1:3002')
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'local', CORE_INTERNAL_URL: 'http://127.0.0.1:3002' })
+  ).toThrow('CORE_INTERNAL_TOKEN')
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'local', CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789' })
+  ).toThrow('CORE_INTERNAL_URL')
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, CORE_INTERNAL_URL: 'http://core.internal' })
+  ).toThrow('CORE_INTERNAL_URL must be https')
+  expect(() => loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, CORE_INTERNAL_TOKEN: 'short' })).toThrow(
+    'CORE_INTERNAL_TOKEN'
+  )
 })
 
 test('the in-memory telephony provider is accepted only when local', () => {

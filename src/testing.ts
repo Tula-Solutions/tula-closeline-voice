@@ -49,6 +49,8 @@ const DEPLOYED_ENV: Readonly<Record<string, string>> = {
   AWS_REGION: 'us-east-1',
   QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/voice',
   STORAGE_BUCKET: 'closeline-voice-test',
+  CORE_INTERNAL_URL: 'https://core.test',
+  CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
   TELEPHONY_PROVIDER: 'twilio',
   TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
   TWILIO_API_KEY_SID: `SK${'b'.repeat(32)}`,

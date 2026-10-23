@@ -27,6 +27,8 @@ const REQUIRED_OUTSIDE_LOCAL = [
   'QUEUE_URL',
   'STORAGE_BUCKET',
   'TELEPHONY_PROVIDER',
+  'CORE_INTERNAL_URL',
+  'CORE_INTERNAL_TOKEN',
 ] as const
 
 /** The Twilio keys a `twilio` provider cannot run without. */
@@ -103,6 +105,16 @@ const schema = z
       .string()
       .regex(/^AP[0-9a-f]{32}$/, 'TWILIO_TWIML_APP_SID must be AP and 32 hex digits')
       .optional(),
+    /**
+     * Core's origin for the internal directory lookups (Memberships, Reps, Teams). https outside
+     * `local`. Required outside `local`; when `local` and unset, an in-memory directory is used.
+     */
+    CORE_INTERNAL_URL: z.url().max(2_048).optional(),
+    /**
+     * The bearer secret core lists in its INTERNAL_API_TOKENS. A credential: never log it.
+     * Required with `CORE_INTERNAL_URL`.
+     */
+    CORE_INTERNAL_TOKEN: z.string().min(16).max(512).optional(),
     /** The Twilio region of the account's API keys; omit for the US default. */
     TWILIO_REGION: z.enum(TWILIO_REGIONS).optional(),
     /**
@@ -136,6 +148,28 @@ const schema = z
           code: 'custom',
           path: ['TELEPHONY_PROVIDER'],
           message: 'TELEPHONY_PROVIDER memory is accepted only when ENVIRONMENT is local',
+        })
+      }
+    }
+    if ((env.CORE_INTERNAL_URL === undefined) !== (env.CORE_INTERNAL_TOKEN === undefined)) {
+      const missing =
+        env.CORE_INTERNAL_URL === undefined ? 'CORE_INTERNAL_URL' : 'CORE_INTERNAL_TOKEN'
+      context.addIssue({
+        code: 'custom',
+        path: [missing],
+        message: 'CORE_INTERNAL_URL and CORE_INTERNAL_TOKEN are set together',
+      })
+    }
+    if (env.CORE_INTERNAL_URL !== undefined) {
+      const core = new URL(env.CORE_INTERNAL_URL)
+      if (
+        core.protocol !== 'https:' &&
+        !(env.ENVIRONMENT === 'local' && core.protocol === 'http:')
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['CORE_INTERNAL_URL'],
+          message: 'CORE_INTERNAL_URL must be https (http only when ENVIRONMENT is local)',
         })
       }
     }
