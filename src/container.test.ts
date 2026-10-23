@@ -151,8 +151,7 @@ test('twilio in local verifies the signatures Twilio makes with the auth token',
   expect(container.telephony.verifyWebhook({ url, body, signature: 'forged' })).toBe(false)
 })
 
-test('twilio in a deployed environment fails closed until it has a durable store', async () => {
-  const lines: string[] = []
+test('twilio in a deployed environment runs on the durable store, not the fail-closed adapter', async () => {
   const container = createContainer(
     loadEnv({
       ...TWILIO_LOCAL,
@@ -160,17 +159,16 @@ test('twilio in a deployed environment fails closed until it has a durable store
       ...DEPLOYED_SOURCE,
       WEBHOOK_BASE_URL: 'https://voice.test',
     }),
-    { logDestination: { write: (l) => lines.push(l) } }
+    { logDestination: { write: () => {} } }
   )
   const url = 'https://voice.test/webhooks/twilio/status'
   const signature = signTwilioRequest(TWILIO_LOCAL.TWILIO_AUTH_TOKEN, url, {})
 
-  expect(container.telephony.verifyWebhook({ url, body: '', signature })).toBe(false)
-  await expect(
-    container.telephony.mintBrowserToken({
-      organizationId: `org_${'a'.repeat(32)}` as never,
-      identity: `mem_${'a'.repeat(32)}` as never,
-    })
-  ).rejects.toMatchObject({ code: 'server.unavailable' })
-  expect(lines.join('\n')).toContain('telephony is not available')
+  expect(container.telephony.verifyWebhook({ url, body: '', signature })).toBe(true)
+  const token = await container.telephony.mintBrowserToken({
+    organizationId: `org_${'a'.repeat(32)}` as never,
+    identity: `mem_${'a'.repeat(32)}` as never,
+  })
+  expect(token).toBeDefined()
+  await container.close()
 })

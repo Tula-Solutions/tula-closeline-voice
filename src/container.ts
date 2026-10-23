@@ -1,10 +1,9 @@
 import { sql } from 'drizzle-orm'
 import type { RequestId } from 'tula-closeline-contract'
-import { createDb } from 'tula-closeline-db'
+import { createDb, type Database } from 'tula-closeline-db'
 import {
   type Clock,
   createLogger,
-  createMemoryTwilioStore,
   createRemoteKeySet,
   createTokenVerifier,
   createTwilioTelephony,
@@ -19,10 +18,10 @@ import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-p
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
+import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import {
   createUnconfiguredNumberProvisioner,
   createUnconfiguredOrganizationDirectory,
-  createUnconfiguredTelephony,
 } from '~/adapters/unconfigured'
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
@@ -104,19 +103,13 @@ export function reportSafely(container: Container, error: unknown, context: Erro
 }
 
 /**
- * Picks the telephony adapter. Twilio runs on the kit adapter with its in-memory store in `local`
- * and `dev` only: the kit refuses that store anywhere else, and no durable store exists yet, so a
- * staging or production deployment gets the fail-closed adapter.
+ * Picks the telephony adapter. Twilio runs on the kit adapter over the Postgres `TwilioStore`, so
+ * it works in every environment. The in-memory store is not used here: it is refused outside
+ * `local` and `dev`, and a durable one keeps calls across instances and restarts.
  */
-function createTelephony(env: Env, logger: Logger): TelephonyPort {
+function createTelephony(env: Env, database: Database): TelephonyPort {
   if (env.TELEPHONY_PROVIDER === 'memory') {
     return createMemoryTelephony()
-  }
-  if (env.ENVIRONMENT !== 'local' && env.ENVIRONMENT !== 'dev') {
-    logger.warn('telephony is not available: it needs a durable store', {
-      environment: env.ENVIRONMENT,
-    })
-    return createUnconfiguredTelephony()
   }
   const {
     TWILIO_ACCOUNT_SID: accountSid,
@@ -141,7 +134,7 @@ function createTelephony(env: Env, logger: Logger): TelephonyPort {
     environment: env.ENVIRONMENT,
     statusCallbackUrl: `${callbacks}/status`,
     recordingStatusCallbackUrl: `${callbacks}/recording`,
-    store: createMemoryTwilioStore(),
+    store: createPostgresTwilioStore(database),
   })
 }
 
@@ -186,7 +179,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
         ? createRunningMemoryNumberProvisioner()
         : createUnconfiguredNumberProvisioner(),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
-    telephony: createTelephony(env, logger),
+    telephony: createTelephony(env, database.db),
     callEvents: createPostgresCallEventStore(database.db),
     // Teams and Reps live in core's schema, which this service never reads; the link to core
     // arrives with its own ticket, and until then naming a Team or Rep fails closed.
