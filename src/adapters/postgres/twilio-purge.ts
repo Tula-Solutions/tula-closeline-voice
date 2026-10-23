@@ -51,6 +51,15 @@ function purgeQuery(table: PurgeTable, organizationId: string, now: Date, limit:
   `
 }
 
+/** A row if the Organization still holds an expired one in the table, whoever has it locked. */
+function expiredExists(table: PurgeTable, organizationId: string, now: Date) {
+  return sql`
+    select 1 from ${sql.raw(`voice.${table}`)}
+    where organization_id = ${organizationId} and expires_at <= ${now.toISOString()}::timestamptz
+    limit 1
+  `
+}
+
 /** Runs batches against one table until one removes nothing or the cap is reached. */
 async function purgeTable(
   db: Database,
@@ -68,7 +77,11 @@ async function purgeTable(
     )
     removed += gone.rows.length
     if (gone.rows.length === 0) {
-      return { removed, drained: true }
+      // A call locked by `withCall` is skipped, so an empty batch is not proof: look for leftovers.
+      const left = await withOrganization(db, organizationId, (tx: Transaction) =>
+        tx.execute(expiredExists(table, organizationId, now))
+      )
+      return { removed, drained: left.rows.length === 0 }
     }
   }
   return { removed, drained: false }
@@ -77,8 +90,8 @@ async function purgeTable(
 /**
  * Removes one Organization's expired Twilio call records and placements in bounded batches, always
  * under `withOrganization`, so row-level security confines it to that Organization. A run stops
- * after `maxBatches` statements per table and reports `drained: false`; a batch that removes
- * nothing is the only proof of an empty backlog (a row another session holds is skipped).
+ * after `maxBatches` statements per table and reports `drained: false`; a call another session
+ * holds is skipped, so `drained` is true only when no expired row is left.
  * Recording rows are not matched by expiry: they go only with their call. The caller supplies the
  * Organization.
  */

@@ -107,6 +107,44 @@ describe('purgeExpiredTwilio', () => {
     expect(await store.getCall(id as string)).toBeNull()
   })
 
+  test('a call locked by withCall is skipped and the run is not reported drained', async () => {
+    const org = newOrganizationId()
+    const [id] = await seedExpired(org, 1, 0)
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let locked: () => void = () => {}
+    const lockTaken = new Promise<void>((resolve) => {
+      locked = resolve
+    })
+    const holder = store.withCall(id as string, async () => {
+      locked()
+      await held
+    })
+    await lockTaken
+    const during = await purgeExpiredTwilio(service.db, org, { now: NOW })
+    expect(during).toEqual({ calls: 0, placements: 0, drained: false })
+    release()
+    await holder
+    expect(await purgeExpiredTwilio(service.db, org, { now: NOW })).toEqual({
+      calls: 1,
+      placements: 0,
+      drained: true,
+    })
+  })
+
+  test('row-level security alone confines a statement run under another Organization scope', async () => {
+    const a = newOrganizationId()
+    const b = newOrganizationId()
+    await seedExpired(b, 1, 1)
+    const removed = await withOrganization(service.db, a, (tx) =>
+      tx.execute(sql`delete from voice.twilio_calls where organization_id = ${b} returning 1`)
+    )
+    expect(removed.rows.length).toBe(0)
+    expect(await counts(b)).toEqual({ calls: 1, placements: 1 })
+  })
+
   test('rejects a non-positive batch size or cap', async () => {
     const org = newOrganizationId()
     await expect(purgeExpiredTwilio(service.db, org, { batchSize: 0 })).rejects.toThrow()
