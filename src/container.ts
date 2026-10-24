@@ -18,6 +18,7 @@ import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organi
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
+import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
@@ -30,6 +31,7 @@ import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
 import type { CallEventStore } from '~/ports/call-event-store'
+import type { CallStore } from '~/ports/call-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
@@ -73,6 +75,8 @@ export type Container = {
   telephony: TelephonyPort
   /** The Call event log, where provider callbacks are recorded once each. */
   callEvents: CallEventStore
+  /** Placed Calls, their state and their log; the only way a module reaches `voice.calls`. */
+  calls: CallStore
   /** Teams and Reps of an Organization, held by the core service. */
   directory: OrganizationDirectory
   /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
@@ -201,6 +205,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: createTelephony(env, database.db),
     callEvents: createPostgresCallEventStore(database.db),
+    calls: createPostgresCallStore(database.db),
     // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
     // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).
     directory: createDirectory(env),

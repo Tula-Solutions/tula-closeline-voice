@@ -2975,6 +2975,2356 @@
           }
         }
       }
+    },
+    "/v1/calls": {
+      "post": {
+        "tags": [
+          "calls"
+        ],
+        "summary": "Place a Call to a Prospect",
+        "description": "Any voice role. Needs an `Idempotency-Key`: the same key with the same request places one Call and answers 200 with it, for 24 hours. The Disclosure plays before the Rep is bridged and before the recording starts, on every Call; there is no setting for it. A Contact Check denial is a warning on the placed Call, never a refusal.",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "lineId": {
+                    "type": "string",
+                    "pattern": "^line_[0-9a-f]{32}$"
+                  },
+                  "prospectId": {
+                    "type": "string",
+                    "pattern": "^prs_[0-9a-f]{32}$"
+                  }
+                },
+                "required": [
+                  "to"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Call this Idempotency-Key placed earlier; nothing was dialled again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^call_[0-9a-f]{32}$"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "inbound",
+                            "outbound"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "ringing",
+                            "connecting",
+                            "disclosing",
+                            "live",
+                            "ended",
+                            "failed",
+                            "missed"
+                          ]
+                        },
+                        "lineId": {
+                          "type": "string",
+                          "pattern": "^line_[0-9a-f]{32}$"
+                        },
+                        "repMembershipId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^mem_[0-9a-f]{32}$"
+                        },
+                        "prospectId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^prs_[0-9a-f]{32}$"
+                        },
+                        "prospectNumber": {
+                          "type": "string",
+                          "pattern": "^\\+[1-9][0-9]{6,14}$"
+                        },
+                        "disclosure": {
+                          "type": "object",
+                          "properties": {
+                            "wordingVersion": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "minimum": 1
+                            },
+                            "playedAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 64,
+                              "format": "date-time"
+                            },
+                            "aiAssisted": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "wordingVersion",
+                            "playedAt",
+                            "aiAssisted"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "answeredAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "endedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "durationSeconds": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 0,
+                          "maximum": 43200
+                        },
+                        "endedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "rep",
+                            "prospect",
+                            "system",
+                            null
+                          ]
+                        },
+                        "failureReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "disclosure_failed",
+                            "carrier_dropped",
+                            "carrier_rejected",
+                            "busy",
+                            "no_answer",
+                            "rep_unreachable",
+                            "provider_error",
+                            "timeout",
+                            null
+                          ]
+                        },
+                        "dealId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 1000
+                        },
+                        "note": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 2000
+                        },
+                        "recordingState": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "storing",
+                            "stored",
+                            "deleted"
+                          ]
+                        },
+                        "transcriptState": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "ready",
+                            "deleted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "direction",
+                        "state",
+                        "lineId",
+                        "repMembershipId",
+                        "prospectId",
+                        "prospectNumber",
+                        "disclosure",
+                        "createdAt",
+                        "answeredAt",
+                        "endedAt",
+                        "durationSeconds",
+                        "endedBy",
+                        "failureReason",
+                        "dealId",
+                        "note",
+                        "recordingState",
+                        "transcriptState"
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "consent.missing",
+                              "consent.withdrawn",
+                              "consent.suppressed",
+                              "consent.unavailable"
+                            ]
+                          },
+                          "suppressionReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "unsubscribe",
+                              "stop",
+                              "bounce",
+                              "complaint",
+                              "manual",
+                              "crm",
+                              "erased",
+                              null
+                            ]
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "suppressionReason"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "maxItems": 4
+                    }
+                  },
+                  "required": [
+                    "call",
+                    "warnings"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The Call, `live` once the Disclosure has played and the Rep is bridged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^call_[0-9a-f]{32}$"
+                        },
+                        "direction": {
+                          "type": "string",
+                          "enum": [
+                            "inbound",
+                            "outbound"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "ringing",
+                            "connecting",
+                            "disclosing",
+                            "live",
+                            "ended",
+                            "failed",
+                            "missed"
+                          ]
+                        },
+                        "lineId": {
+                          "type": "string",
+                          "pattern": "^line_[0-9a-f]{32}$"
+                        },
+                        "repMembershipId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^mem_[0-9a-f]{32}$"
+                        },
+                        "prospectId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "pattern": "^prs_[0-9a-f]{32}$"
+                        },
+                        "prospectNumber": {
+                          "type": "string",
+                          "pattern": "^\\+[1-9][0-9]{6,14}$"
+                        },
+                        "disclosure": {
+                          "type": "object",
+                          "properties": {
+                            "wordingVersion": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "minimum": 1
+                            },
+                            "playedAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "maxLength": 64,
+                              "format": "date-time"
+                            },
+                            "aiAssisted": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "wordingVersion",
+                            "playedAt",
+                            "aiAssisted"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "answeredAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "endedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "durationSeconds": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 0,
+                          "maximum": 43200
+                        },
+                        "endedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "rep",
+                            "prospect",
+                            "system",
+                            null
+                          ]
+                        },
+                        "failureReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "disclosure_failed",
+                            "carrier_dropped",
+                            "carrier_rejected",
+                            "busy",
+                            "no_answer",
+                            "rep_unreachable",
+                            "provider_error",
+                            "timeout",
+                            null
+                          ]
+                        },
+                        "dealId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 1000
+                        },
+                        "note": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 2000
+                        },
+                        "recordingState": {
+                          "type": "string",
+                          "enum": [
+                            "none",
+                            "storing",
+                            "stored",
+                            "deleted"
+                          ]
+                        },
+                        "transcriptState": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "ready",
+                            "deleted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "direction",
+                        "state",
+                        "lineId",
+                        "repMembershipId",
+                        "prospectId",
+                        "prospectNumber",
+                        "disclosure",
+                        "createdAt",
+                        "answeredAt",
+                        "endedAt",
+                        "durationSeconds",
+                        "endedBy",
+                        "failureReason",
+                        "dealId",
+                        "note",
+                        "recordingState",
+                        "transcriptState"
+                      ]
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "consent.missing",
+                              "consent.withdrawn",
+                              "consent.suppressed",
+                              "consent.unavailable"
+                            ]
+                          },
+                          "suppressionReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "unsubscribe",
+                              "stop",
+                              "bounce",
+                              "complaint",
+                              "manual",
+                              "crm",
+                              "erased",
+                              null
+                            ]
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "suppressionReason"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "maxItems": 4
+                    }
+                  },
+                  "required": [
+                    "call",
+                    "warnings"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The access token is missing, expired or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth.forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "line.not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "call.line_unavailable, or request.idempotency_in_progress while the first request with this Idempotency-Key is still running (send it again after Retry-After).",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$",
+                  "description": "Whole seconds to wait before trying again."
+                },
+                "required": true,
+                "description": "Whole seconds to wait before trying again."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "call.number_invalid, or request.idempotency_key_reused: the key was used for another request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "call.disclosure_failed: the Disclosure did not play; the Call failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "server.unavailable: the telephony provider did not answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "calls"
+        ],
+        "summary": "List Calls",
+        "description": "A Rep sees their own Calls, a Manager their own and their Team Reps, an Owner or Admin all. Newest first, cursor pagination, at most 100 per page.",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\d{1,3}$"
+                }
+              ],
+              "default": 25
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound"
+              ]
+            },
+            "required": false,
+            "name": "direction",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ringing",
+                "connecting",
+                "disclosing",
+                "live",
+                "ended",
+                "failed",
+                "missed"
+              ]
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^mem_[0-9a-f]{32}$"
+            },
+            "required": false,
+            "name": "repMembershipId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^line_[0-9a-f]{32}$"
+            },
+            "required": false,
+            "name": "lineId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^prs_[0-9a-f]{32}$"
+            },
+            "required": false,
+            "name": "prospectId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of Calls.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^call_[0-9a-f]{32}$"
+                          },
+                          "direction": {
+                            "type": "string",
+                            "enum": [
+                              "inbound",
+                              "outbound"
+                            ]
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "ringing",
+                              "connecting",
+                              "disclosing",
+                              "live",
+                              "ended",
+                              "failed",
+                              "missed"
+                            ]
+                          },
+                          "lineId": {
+                            "type": "string",
+                            "pattern": "^line_[0-9a-f]{32}$"
+                          },
+                          "repMembershipId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "pattern": "^mem_[0-9a-f]{32}$"
+                          },
+                          "prospectId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "pattern": "^prs_[0-9a-f]{32}$"
+                          },
+                          "prospectNumber": {
+                            "type": "string",
+                            "pattern": "^\\+[1-9][0-9]{6,14}$"
+                          },
+                          "disclosure": {
+                            "type": "object",
+                            "properties": {
+                              "wordingVersion": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 1
+                              },
+                              "playedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "maxLength": 64,
+                                "format": "date-time"
+                              },
+                              "aiAssisted": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "wordingVersion",
+                              "playedAt",
+                              "aiAssisted"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "format": "date-time"
+                          },
+                          "answeredAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 64,
+                            "format": "date-time"
+                          },
+                          "endedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 64,
+                            "format": "date-time"
+                          },
+                          "durationSeconds": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "minimum": 0,
+                            "maximum": 43200
+                          },
+                          "endedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "rep",
+                              "prospect",
+                              "system",
+                              null
+                            ]
+                          },
+                          "failureReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "disclosure_failed",
+                              "carrier_dropped",
+                              "carrier_rejected",
+                              "busy",
+                              "no_answer",
+                              "rep_unreachable",
+                              "provider_error",
+                              "timeout",
+                              null
+                            ]
+                          },
+                          "dealId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 1000
+                          },
+                          "note": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 2000
+                          },
+                          "recordingState": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "storing",
+                              "stored",
+                              "deleted"
+                            ]
+                          },
+                          "transcriptState": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "ready",
+                              "deleted"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "direction",
+                          "state",
+                          "lineId",
+                          "repMembershipId",
+                          "prospectId",
+                          "prospectNumber",
+                          "disclosure",
+                          "createdAt",
+                          "answeredAt",
+                          "endedAt",
+                          "durationSeconds",
+                          "endedBy",
+                          "failureReason",
+                          "dealId",
+                          "note",
+                          "recordingState",
+                          "transcriptState"
+                        ]
+                      },
+                      "maxItems": 100
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid: the query or the cursor is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The access token is missing, expired or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth.forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "server.unavailable: the directory did not answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/calls/{callId}": {
+      "get": {
+        "tags": [
+          "calls"
+        ],
+        "summary": "Read one Call",
+        "description": "A Call the caller may not see, or of another Organization, is call.not_found.",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^call_[0-9a-f]{32}$"
+            },
+            "required": true,
+            "name": "callId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Call.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^call_[0-9a-f]{32}$"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "inbound",
+                        "outbound"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "ringing",
+                        "connecting",
+                        "disclosing",
+                        "live",
+                        "ended",
+                        "failed",
+                        "missed"
+                      ]
+                    },
+                    "lineId": {
+                      "type": "string",
+                      "pattern": "^line_[0-9a-f]{32}$"
+                    },
+                    "repMembershipId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^mem_[0-9a-f]{32}$"
+                    },
+                    "prospectId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^prs_[0-9a-f]{32}$"
+                    },
+                    "prospectNumber": {
+                      "type": "string",
+                      "pattern": "^\\+[1-9][0-9]{6,14}$"
+                    },
+                    "disclosure": {
+                      "type": "object",
+                      "properties": {
+                        "wordingVersion": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 1
+                        },
+                        "playedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "aiAssisted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "wordingVersion",
+                        "playedAt",
+                        "aiAssisted"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "answeredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "durationSeconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 43200
+                    },
+                    "endedBy": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "rep",
+                        "prospect",
+                        "system",
+                        null
+                      ]
+                    },
+                    "failureReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "disclosure_failed",
+                        "carrier_dropped",
+                        "carrier_rejected",
+                        "busy",
+                        "no_answer",
+                        "rep_unreachable",
+                        "provider_error",
+                        "timeout",
+                        null
+                      ]
+                    },
+                    "dealId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 1000
+                    },
+                    "note": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 2000
+                    },
+                    "recordingState": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "storing",
+                        "stored",
+                        "deleted"
+                      ]
+                    },
+                    "transcriptState": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "direction",
+                    "state",
+                    "lineId",
+                    "repMembershipId",
+                    "prospectId",
+                    "prospectNumber",
+                    "disclosure",
+                    "createdAt",
+                    "answeredAt",
+                    "endedAt",
+                    "durationSeconds",
+                    "endedBy",
+                    "failureReason",
+                    "dealId",
+                    "note",
+                    "recordingState",
+                    "transcriptState"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The access token is missing, expired or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth.forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "call.not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "server.unavailable: the directory did not answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/calls/{callId}/wrap-up": {
+      "put": {
+        "tags": [
+          "calls"
+        ],
+        "summary": "Wrap up an ended Call",
+        "description": "The Rep who took the Call, and an Owner or Admin. Links a Deal and stores a note. Anyone else gets call.not_found.",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^call_[0-9a-f]{32}$"
+            },
+            "required": true,
+            "name": "callId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "dealId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 1000
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 2000
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Call with its wrap-up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^call_[0-9a-f]{32}$"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "inbound",
+                        "outbound"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "ringing",
+                        "connecting",
+                        "disclosing",
+                        "live",
+                        "ended",
+                        "failed",
+                        "missed"
+                      ]
+                    },
+                    "lineId": {
+                      "type": "string",
+                      "pattern": "^line_[0-9a-f]{32}$"
+                    },
+                    "repMembershipId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^mem_[0-9a-f]{32}$"
+                    },
+                    "prospectId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^prs_[0-9a-f]{32}$"
+                    },
+                    "prospectNumber": {
+                      "type": "string",
+                      "pattern": "^\\+[1-9][0-9]{6,14}$"
+                    },
+                    "disclosure": {
+                      "type": "object",
+                      "properties": {
+                        "wordingVersion": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 1
+                        },
+                        "playedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "aiAssisted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "wordingVersion",
+                        "playedAt",
+                        "aiAssisted"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "answeredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "durationSeconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 43200
+                    },
+                    "endedBy": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "rep",
+                        "prospect",
+                        "system",
+                        null
+                      ]
+                    },
+                    "failureReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "disclosure_failed",
+                        "carrier_dropped",
+                        "carrier_rejected",
+                        "busy",
+                        "no_answer",
+                        "rep_unreachable",
+                        "provider_error",
+                        "timeout",
+                        null
+                      ]
+                    },
+                    "dealId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 1000
+                    },
+                    "note": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 2000
+                    },
+                    "recordingState": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "storing",
+                        "stored",
+                        "deleted"
+                      ]
+                    },
+                    "transcriptState": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "ready",
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "direction",
+                    "state",
+                    "lineId",
+                    "repMembershipId",
+                    "prospectId",
+                    "prospectNumber",
+                    "disclosure",
+                    "createdAt",
+                    "answeredAt",
+                    "endedAt",
+                    "durationSeconds",
+                    "endedBy",
+                    "failureReason",
+                    "dealId",
+                    "note",
+                    "recordingState",
+                    "transcriptState"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The access token is missing, expired or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth.forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "call.not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "call.not_ended: the Call is still going.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

@@ -44,10 +44,21 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   Add, assign and release are Owner and Admin; list and read are every role. Every tenant query
   goes through `withOrganization` (`src/adapters/postgres/line-store.ts`). `providerSid` never
   leaves the service.
-- Ports (`src/ports/`): `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
+- `src/modules/call/` places and lists Calls (`POST/GET /v1/calls`, `GET /v1/calls/{id}`,
+  `PUT /v1/calls/{id}/wrap-up`). `state.ts` holds the one edge table (`canTransition`): `live` is
+  unreachable without a stored Disclosure version, and the stores enforce it. Placing needs an
+  `Idempotency-Key`, stores the `ringing` Call in the idempotency transaction, then walks the
+  provider after commit: place, play the Disclosure (`DISCLOSURE_WORDING`, version 1, in
+  `service.ts`; no setting, ADR 0003), bridge the Rep, start the Recording, `live`. A Disclosure
+  failure ends the Call `failed`. Visibility: Rep own, Manager own plus `teamRepsOf`, Owner and
+  Admin all; any other Call is `call.not_found`. `Calls.end` is service-only (no route yet).
+  The place-Call path is not a hot path: a Rep places a few Calls a minute and it is bound by the
+  provider's latency, so it has no benchmark.
+- Ports (`src/ports/`): `CallStore` (Postgres and memory; every event row is written in the same
+  transaction as the change), `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
   requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
   transaction, see `src/modules/idempotency/service.ts`), `NumberProvisioner` (buy, port, release a number),
-  `OrganizationDirectory` (Teams and Reps, owned by core; `src/adapters/core-http/` asks core's
+  `OrganizationDirectory` (Teams, Reps and a Manager's Team Reps via `teamRepsOf`, owned by core; `src/adapters/core-http/` asks core's
   `/internal/v1/directory/*` routes with a per-attempt timeout and bounded jittered retry on
   network errors and 5xx, and any failure is `server.unavailable`; an Organization that is not
   `active` has no Membership). Memory adapters are in `src/adapters/memory/`;

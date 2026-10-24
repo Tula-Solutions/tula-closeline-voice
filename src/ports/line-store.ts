@@ -24,6 +24,8 @@ export type LineListQuery = {
   cursor?: LineCursor
   limit: number
   state?: LineState
+  /** Only the Lines assigned to this Rep's Membership. */
+  assignedToRep?: string
 }
 
 /** Thrown by {@link LineStore.insert} when the number is live in some Organization already. */

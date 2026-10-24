@@ -60,6 +60,11 @@ export function createMemoryLineStore(): LineStore {
     async list(organizationId, query) {
       const lines = [...rowsOf(organizationId).values()]
         .filter((line) => query.state === undefined || line.state === query.state)
+        .filter(
+          (line) =>
+            query.assignedToRep === undefined ||
+            (line.assignment.kind === 'rep' && line.assignment.membershipId === query.assignedToRep)
+        )
         .filter((line) => query.cursor === undefined || afterCursor(line, query.cursor))
         .sort((a, b) =>
           a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1
