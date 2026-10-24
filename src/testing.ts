@@ -20,6 +20,7 @@ import {
   createMemoryCallEventStore,
   type MemoryCallEventStore,
 } from '~/adapters/memory/call-event-store'
+import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import {
   createMemoryIdempotencyStore,
   type MemoryIdempotencyStore,
@@ -74,6 +75,7 @@ export type TestDeps = Container & {
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
   callEvents: MemoryCallEventStore
+  calls: MemoryCallStore
   /** Every JSON log line written, in order. */
   logLines: string[]
   /** Every call to `reportError`, in order. */
@@ -114,6 +116,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: overrides.telephony ?? createMemoryTelephony(),
     callEvents: createMemoryCallEventStore(),
+    calls: createMemoryCallStore(),
     directory: createMemoryOrganizationDirectory(),
     close: async () => undefined,
     readinessChecks: overrides.readinessChecks ?? [],

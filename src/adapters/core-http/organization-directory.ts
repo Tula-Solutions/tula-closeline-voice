@@ -3,6 +3,7 @@ import {
   internalDirectoryMembershipResponseSchema,
   internalDirectoryRepCheckResponseSchema,
   internalDirectoryTeamCheckResponseSchema,
+  internalDirectoryTeamRepsResponseSchema,
 } from 'tula-closeline-contract'
 import { AppError } from 'tula-closeline-kit'
 import type { z } from 'zod'
@@ -117,6 +118,14 @@ export function createCoreHttpOrganizationDirectory(
         ? answer.membershipId
         : undefined
     },
+    teamRepsOf: async (organizationId, membershipId) =>
+      (
+        await call(
+          '/internal/v1/directory/team-reps',
+          { organizationId, membershipId },
+          internalDirectoryTeamRepsResponseSchema
+        )
+      ).membershipIds,
     isRep: async (organizationId, membershipId) =>
       (
         await call(

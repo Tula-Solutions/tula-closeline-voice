@@ -26,6 +26,7 @@ export function createUnconfiguredOrganizationDirectory(): OrganizationDirectory
     teamExists: async () => Promise.reject(unavailable()),
     isRep: async () => Promise.reject(unavailable()),
     membershipOf: async () => Promise.reject(unavailable()),
+    teamRepsOf: async () => Promise.reject(unavailable()),
   }
 }
 

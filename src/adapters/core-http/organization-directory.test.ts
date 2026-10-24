@@ -128,3 +128,20 @@ test('a malformed or non-JSON body fails closed without a retry', async () => {
     expect(member.calls).toHaveLength(1)
   }
 })
+
+test('teamRepsOf posts the Manager Membership and returns the Rep Membership ids', async () => {
+  const rep = `mem_${'e'.repeat(32)}`
+  const { directory, calls } = setup([json({ membershipIds: [rep] })])
+  expect(await directory.teamRepsOf(ORG, MEM)).toEqual([rep])
+  expect(calls[0]?.url).toBe('http://core.test/internal/v1/directory/team-reps')
+  expect(calls[0]?.body).toEqual({ organizationId: ORG, membershipId: MEM })
+})
+
+test('teamRepsOf fails closed on a refusal or a malformed body', async () => {
+  await expect(setup([json({}, 403)]).directory.teamRepsOf(ORG, MEM)).rejects.toMatchObject(
+    unavailable
+  )
+  await expect(
+    setup([json({ membershipIds: ['nope'] })]).directory.teamRepsOf(ORG, MEM)
+  ).rejects.toMatchObject(unavailable)
+})

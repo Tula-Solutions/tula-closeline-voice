@@ -98,6 +98,12 @@ export function createPostgresLineStore(db: Database): LineStore {
             and(
               eq(voiceLines.organizationId, organizationId),
               query.state === undefined ? undefined : eq(voiceLines.state, query.state),
+              query.assignedToRep === undefined
+                ? undefined
+                : and(
+                    eq(voiceLines.assignmentKind, 'rep'),
+                    eq(voiceLines.assignmentMembershipId, query.assignedToRep)
+                  ),
               query.cursor === undefined
                 ? undefined
                 : sql`(${voiceLines.createdAt}, ${voiceLines.id}) < (${query.cursor.createdAt}::timestamptz, ${query.cursor.id})`

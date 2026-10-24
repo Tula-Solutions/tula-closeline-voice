@@ -1,0 +1,137 @@
+import { afterAll, describe, expect, test } from 'bun:test'
+import { formatId, type OrganizationId } from 'tula-closeline-contract'
+import { createDb } from 'tula-closeline-db'
+import { integrationUrls } from '~/integration-support'
+import {
+  type CallCursor,
+  CallKeyTakenError,
+  type CallStore,
+  InvalidTransitionError,
+  type NewCall,
+} from '~/ports/call-store'
+import { createPostgresCallStore } from './call-store'
+import { createPostgresLineStore } from './line-store'
+
+const { db, close } = createDb(integrationUrls().service)
+const calls: CallStore = createPostgresCallStore(db)
+const lines = createPostgresLineStore(db)
+
+afterAll(close)
+
+const newOrganization = (): OrganizationId => formatId('org', crypto.randomUUID())
+const T0 = new Date('2026-01-01T00:00:00.000Z')
+const at = (seconds: number) => new Date(T0.getTime() + seconds * 1000)
+
+/** Inserts a Line (a Call refers to one) and returns a Call for it. */
+async function callFor(org: OrganizationId, overrides: Partial<NewCall> = {}): Promise<NewCall> {
+  const line = await lines.insert(org, {
+    id: formatId('line', crypto.randomUUID()),
+    number: `+1555${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`,
+    country: 'US',
+    label: null,
+    state: 'active',
+    providerSid: `PN${crypto.randomUUID().replaceAll('-', '')}`,
+    createdAt: T0,
+  })
+  return {
+    id: formatId('call', crypto.randomUUID()),
+    lineId: line.id,
+    repMembershipId: formatId('mem', crypto.randomUUID()),
+    prospectId: null,
+    prospectNumber: '+14155550100',
+    createdAt: T0,
+    ...overrides,
+  }
+}
+
+describe('the Postgres Call store', () => {
+  test('inserts a ringing Call, reads it back and logs the first state', async () => {
+    const org = newOrganization()
+    const input = await callFor(org)
+    const inserted = await calls.insert(org, input)
+    expect(inserted.state).toBe('ringing')
+    expect(await calls.get(org, input.id)).toEqual(inserted)
+    expect((await calls.events(org, input.id)).map((e) => e.kind)).toEqual(['state_changed'])
+  })
+
+  test('walks to live only through a stored Disclosure, in order', async () => {
+    const org = newOrganization()
+    const input = await callFor(org)
+    await calls.insert(org, input)
+    await calls.setProviderCallSid(org, input.id, 'CA123')
+    await calls.transition(org, input.id, { to: 'connecting', at: at(1) })
+    await calls.transition(org, input.id, { to: 'disclosing', at: at(2) })
+    await expect(calls.transition(org, input.id, { to: 'live', at: at(3) })).rejects.toBeInstanceOf(
+      InvalidTransitionError
+    )
+    await calls.recordDisclosure(org, input.id, {
+      wordingVersion: 1,
+      aiAssisted: false,
+      playedAt: at(3),
+    })
+    await calls.recordRecordingStarted(org, input.id, at(4))
+    const live = await calls.transition(org, input.id, { to: 'live', at: at(5) })
+    expect(live?.state).toBe('live')
+    expect(live?.disclosure.wordingVersion).toBe(1)
+    const kinds = (await calls.events(org, input.id)).map((e) => e.kind)
+    expect(kinds.indexOf('disclosure_played')).toBeLessThan(kinds.indexOf('recording_started'))
+    const ended = await calls.transition(org, input.id, { to: 'ended', at: at(65), endedBy: 'rep' })
+    expect(ended?.state).toBe('ended')
+    const wrapped = await calls.wrapUp(org, input.id, { note: 'Booked a demo' })
+    expect(wrapped?.note).toBe('Booked a demo')
+  })
+
+  test('refuses a second Call under the same idempotency key', async () => {
+    const org = newOrganization()
+    const idempotency = {
+      key: crypto.randomUUID().replaceAll('-', '').repeat(2),
+      fingerprint: 'f'.repeat(64),
+    }
+    await calls.insert(org, await callFor(org, { idempotency }))
+    await expect(calls.insert(org, await callFor(org, { idempotency }))).rejects.toBeInstanceOf(
+      CallKeyTakenError
+    )
+  })
+
+  test('shows another Organization nothing', async () => {
+    const org = newOrganization()
+    const input = await callFor(org)
+    await calls.insert(org, input)
+    const other = newOrganization()
+    expect(await calls.get(other, input.id)).toBeUndefined()
+    expect(await calls.list(other, { limit: 10 })).toEqual([])
+  })
+
+  test('pages newest first by keyset and filters by Rep', async () => {
+    const org = newOrganization()
+    const mine = formatId('mem', crypto.randomUUID())
+    const ids: string[] = []
+    for (const [second, rep] of [
+      [1, mine],
+      [2, undefined],
+      [3, mine],
+      [3, undefined],
+    ] as const) {
+      const input = await callFor(org, {
+        createdAt: at(second),
+        ...(rep ? { repMembershipId: rep } : {}),
+      })
+      ids.push((await calls.insert(org, input)).id)
+    }
+    const seen: string[] = []
+    let cursor: CallCursor | undefined
+    for (let guard = 0; guard < 10; guard += 1) {
+      const rows = await calls.list(org, { limit: 2, ...(cursor ? { cursor } : {}) })
+      seen.push(...rows.map((r) => r.id))
+      const last = rows.at(-1)
+      if (rows.length < 2 || !last) {
+        break
+      }
+      cursor = { createdAt: last.createdAt, id: last.id }
+    }
+    expect(seen.sort()).toEqual([...ids].sort())
+    const own = await calls.list(org, { limit: 10, repMembershipIds: [mine] })
+    expect(own).toHaveLength(2)
+    expect(await calls.list(org, { limit: 10, repMembershipIds: [] })).toEqual([])
+  })
+})
