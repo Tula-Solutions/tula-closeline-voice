@@ -113,6 +113,26 @@ export type CallStore = {
     repMembershipId: string,
     at: Date
   ) => Promise<StoredCall | undefined>
+  /**
+   * Up to `limit` Organization ids, ascending and strictly after `after` (null starts at the
+   * beginning), that hold an inbound Call still `ringing` since before `before`.
+   */
+  organizationsWithStaleRinging: (
+    before: Date,
+    after: string | null,
+    limit: number
+  ) => Promise<string[]>
+  /**
+   * Moves up to `limit` of the Organization's inbound Calls that have been `ringing` since before
+   * `before` to `missed`, in one conditional update, and returns them. A Call a Rep claimed in the
+   * meantime is not `ringing` and is not touched, so repeating this is harmless.
+   */
+  missStaleRinging: (
+    organizationId: string,
+    before: Date,
+    at: Date,
+    limit: number
+  ) => Promise<StoredCall[]>
   /** One Call, or `undefined` when this Organization has none with that id. */
   get: (organizationId: string, id: VoiceCall['id']) => Promise<StoredCall | undefined>
   /** The Calls after the cursor, newest first by `(createdAt, id)`, at most `limit`. */

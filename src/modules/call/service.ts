@@ -37,7 +37,6 @@ export type CallDeps = Pick<
   | 'idempotency'
   | 'numberTimeoutMs'
   | 'env'
-  | 'after'
 >
 
 /** The route name a place-Call `Idempotency-Key` is stored under. */
@@ -464,13 +463,6 @@ export async function end(
   }
 }
 
-/** The error for an answer that lost: the Call is no longer ringing for this Rep. */
-const NOT_RINGING = {
-  code: 'call.not_ringing',
-  status: 409,
-  message: 'The Call is no longer ringing.',
-} as const
-
 /** The most Reps one inbound Call rings, the telephony port's own cap on legs. */
 const MAX_RINGING_REPS = 50
 
@@ -577,7 +569,6 @@ export async function ringInbound(
     await miss(deps, organizationId, call)
     return 'missed'
   }
-  deps.after(deps.env.RING_TIMEOUT_MS, () => miss(deps, organizationId, call))
   return 'ringing'
 }
 
@@ -617,7 +608,7 @@ export async function answer(
     if (current?.repMembershipId === membershipId && current.state !== 'missed') {
       return toCall(current)
     }
-    throw domainError(NOT_RINGING)
+    throw domainError(VOICE_ERRORS['call.not_ringing'])
   }
   if (claimed.providerCallSid === null) {
     throw domainError(ERRORS['server.unavailable'])

@@ -99,11 +99,6 @@ export type Container = {
   callEvents: CallEventStore
   /** Placed Calls, their state and their log; the only way a module reaches `voice.calls`. */
   calls: CallStore
-  /**
-   * Runs `task` once after `ms`. Used for the ring timeout of an inbound Call; the task must
-   * decide from the database whether it still has work (it is lost if the process restarts).
-   */
-  after: (ms: number, task: () => Promise<void>) => void
   /** Teams and Reps of an Organization, held by the core service. */
   directory: OrganizationDirectory
   /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
@@ -262,13 +257,6 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
     // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).
     directory: createDirectory(env),
-    after: (ms, task) => {
-      setTimeout(() => {
-        task().catch((error: unknown) =>
-          logger.error('scheduled task failed', { error: describeError(error) })
-        )
-      }, ms).unref()
-    },
     ...(env.TELEPHONY_PROVIDER === 'twilio'
       ? {
           twilioPurge: createPostgresTwilioPurgeSource(

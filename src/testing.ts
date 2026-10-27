@@ -90,10 +90,6 @@ export type TestDeps = Container & {
   directory: MemoryOrganizationDirectory
   callEvents: MemoryCallEventStore
   calls: MemoryCallStore
-  /** The tasks `after` was given and has not run yet. */
-  pendingTasks: { ms: number; task: () => Promise<void> }[]
-  /** Runs every pending `after` task, as if their time had come. */
-  fireTasks: () => Promise<void>
   /** Every JSON log line written, in order. */
   logLines: string[]
   /** Every call to `reportError`, in order. */
@@ -113,7 +109,6 @@ export type TestDepsOverrides = {
 export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
   const logLines: string[] = []
   const reported: TestDeps['reported'] = []
-  const pendingTasks: TestDeps['pendingTasks'] = []
 
   return {
     env: loadEnv({
@@ -142,13 +137,6 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     callEvents: createMemoryCallEventStore(),
     calls: createMemoryCallStore(),
     directory: createMemoryOrganizationDirectory(),
-    after: (ms, task) => void pendingTasks.push({ ms, task }),
-    pendingTasks,
-    fireTasks: async () => {
-      for (const { task } of pendingTasks.splice(0)) {
-        await task()
-      }
-    },
     close: async () => undefined,
     readinessChecks: overrides.readinessChecks ?? [],
     lifecycle: { draining: false },

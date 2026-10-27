@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { formatId } from 'tula-closeline-contract'
 import { createMemoryTelephony, type MemoryTelephony } from 'tula-closeline-kit/testing'
+import { sweepMissed } from '~/modules/call/missed-sweep'
 import {
   createTestApp,
   identityOf,
@@ -59,6 +60,12 @@ async function ring(to: string, org = organizationId, sid?: string, signed = tru
   return { response, providerCallId }
 }
 
+/** Lets the ring time pass and runs one missed-Call sweep, as the schedule would after a restart. */
+async function sweep(after = '31s') {
+  t.deps.clock.advance(after)
+  return sweepMissed(t.deps, { maxOrganizations: 100, shouldStop: () => false })
+}
+
 const answer = (who: TestIdentity, callId: string) => t.call(who, 'POST', `/calls/${callId}/answer`)
 const callsOf = async (org = organizationId) =>
   (await t.deps.calls.list(org, { limit: 50 })) as unknown as CallBody[]
@@ -96,8 +103,7 @@ describe('an inbound Call to a Line assigned to a Rep', () => {
     const other = partyIn(organizationId)
     const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
     await ring(number)
-    expect(t.deps.pendingTasks[0]?.ms).toBe(t.deps.env.RING_TIMEOUT_MS)
-    await t.deps.fireTasks()
+    await sweep()
 
     const mine = await listed(rep.identity, '?state=missed')
     expect(mine).toHaveLength(1)
@@ -107,24 +113,96 @@ describe('an inbound Call to a Line assigned to a Rep', () => {
     expect(await listed(admin, '?state=missed')).toHaveLength(1)
   })
 
-  it('does not miss a Call that was answered before the timer fires', async () => {
+  it('does not miss a Call that was answered before the sweep runs', async () => {
     const rep = partyIn(organizationId)
     const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
     await ring(number)
     const [call] = await callsOf()
     await answer(rep.identity, call?.id as string)
-    await t.deps.fireTasks()
+    await sweep()
     expect((await callsOf())[0]?.state).toBe('live')
   })
 
-  it('does not miss a Call a Rep has claimed but not yet bridged when the timer fires', async () => {
+  it('does not miss a Call a Rep has claimed but not yet bridged when the sweep runs', async () => {
     const rep = partyIn(organizationId)
     const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
     await ring(number)
     const [call] = await callsOf()
     await t.deps.calls.claimInbound(organizationId, call?.id as never, rep.membership, new Date())
-    await t.deps.fireTasks()
+    await sweep()
     expect((await callsOf())[0]?.state).toBe('connecting')
+  })
+
+  it('misses a Call by the database alone: no timer, no memory of the ring', async () => {
+    const rep = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    expect(await sweep('5s')).toBe(0)
+    expect((await callsOf())[0]?.state).toBe('ringing')
+    expect(await sweep('30s')).toBe(1)
+    expect((await callsOf())[0]?.state).toBe('missed')
+    expect(telephony.operations.filter((entry) => entry.operation === 'hangUp')).toHaveLength(1)
+  })
+
+  it('is harmless to sweep twice: one miss, one hang-up', async () => {
+    const rep = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    expect(await sweep()).toBe(1)
+    expect(await sweep('1m')).toBe(0)
+    expect(telephony.operations.filter((entry) => entry.operation === 'hangUp')).toHaveLength(1)
+  })
+
+  it('leaves another Organization alone when it sweeps only what is stale', async () => {
+    const orgB = newOrganizationId()
+    const repA = partyIn(organizationId)
+    const repB = partyIn(orgB)
+    const numberA = await lineWith(organizationId, { kind: 'rep', membershipId: repA.membership })
+    await ring(numberA)
+    t.deps.clock.advance('31s')
+    const numberB = await lineWith(orgB, { kind: 'rep', membershipId: repB.membership })
+    await ring(numberB, orgB)
+    expect(await sweep('0s')).toBe(1)
+    expect((await callsOf())[0]?.state).toBe('missed')
+    expect((await callsOf(orgB))[0]?.state).toBe('ringing')
+  })
+
+  it('keeps sweeping the other Organizations when one Organization fails', async () => {
+    const orgB = newOrganizationId()
+    const repA = partyIn(organizationId)
+    const repB = partyIn(orgB)
+    await ring(await lineWith(organizationId, { kind: 'rep', membershipId: repA.membership }))
+    await ring(await lineWith(orgB, { kind: 'rep', membershipId: repB.membership }), orgB)
+    t.deps.clock.advance('31s')
+    let failed = 0
+    const calls = Object.create(t.deps.calls) as typeof t.deps.calls
+    calls.missStaleRinging = (org, ...rest) => {
+      if (failed === 0) {
+        failed += 1
+        return Promise.reject(new Error('boom'))
+      }
+      return t.deps.calls.missStaleRinging(org, ...rest)
+    }
+    const missed = await sweepMissed(
+      { ...t.deps, calls },
+      { maxOrganizations: 100, shouldStop: () => false }
+    )
+    expect(missed).toBe(1)
+    const states = [...(await callsOf()), ...(await callsOf(orgB))].map((call) => call.state)
+    expect(states.sort()).toEqual(['missed', 'ringing'])
+  })
+
+  it('answering again as the Rep who holds the Call is a no-op: 200, nothing runs twice', async () => {
+    const rep = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    const [call] = await callsOf()
+    const first = await answer(rep.identity, call?.id as string)
+    const before = telephony.operations.length
+    const again = await answer(rep.identity, call?.id as string)
+    expect(again.status).toBe(200)
+    expect((again.body as CallBody).id).toBe((first.body as CallBody).id)
+    expect(telephony.operations.length).toBe(before)
   })
 
   it('records and rings once when the provider redelivers the webhook', async () => {
@@ -134,7 +212,6 @@ describe('an inbound Call to a Line assigned to a Rep', () => {
     const again = await ring(number, organizationId, first.providerCallId)
     expect(again.response.status).toBe(200)
     expect(await callsOf()).toHaveLength(1)
-    expect(t.deps.pendingTasks).toHaveLength(1)
     expect(telephony.operations.filter((entry) => entry.operation === 'answerCall')).toHaveLength(1)
   })
 
@@ -156,7 +233,7 @@ describe('an inbound Call to a Line assigned to a Rep', () => {
     const rep = partyIn(organizationId)
     const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
     await ring(number)
-    await t.deps.fireTasks()
+    await sweep()
     expect(t.deps.logLines.join('\n')).not.toContain(CALLER.slice(1))
   })
 })

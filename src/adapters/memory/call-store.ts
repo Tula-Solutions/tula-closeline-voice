@@ -32,6 +32,11 @@ export function createMemoryCallStore(): MemoryCallStore {
     disclosure: { ...call.disclosure },
   })
 
+  const isStale = (call: StoredCall, before: Date): boolean =>
+    call.direction === 'inbound' &&
+    call.state === 'ringing' &&
+    Date.parse(call.createdAt) < before.getTime()
+
   return {
     idsOf: (organizationId) => [...rowsOf(organizationId).keys()],
 
@@ -125,6 +130,34 @@ export function createMemoryCallStore(): MemoryCallStore {
       row.call.repMembershipId = repMembershipId as VoiceCall['repMembershipId']
       row.log.push({ kind: 'state_changed', fromState: 'ringing', toState: 'connecting', at })
       return copy(row.call)
+    },
+
+    async organizationsWithStaleRinging(before, after, limit) {
+      return [...organizations.entries()]
+        .filter(
+          ([id, rows]) =>
+            (after === null || id > after) &&
+            [...rows.values()].some((row) => isStale(row.call, before))
+        )
+        .map(([id]) => id)
+        .sort()
+        .slice(0, limit)
+    },
+
+    async missStaleRinging(organizationId, before, at, limit) {
+      const missed: StoredCall[] = []
+      for (const row of rowsOf(organizationId).values()) {
+        if (missed.length >= limit) {
+          break
+        }
+        if (isStale(row.call, before)) {
+          row.call.state = 'missed'
+          row.call.endedAt = at.toISOString()
+          row.log.push({ kind: 'state_changed', fromState: 'ringing', toState: 'missed', at })
+          missed.push(copy(row.call))
+        }
+      }
+      return missed
     },
 
     async get(organizationId, id) {
