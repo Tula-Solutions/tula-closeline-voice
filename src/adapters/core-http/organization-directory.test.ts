@@ -145,3 +145,38 @@ test('teamRepsOf fails closed on a refusal or a malformed body', async () => {
     setup([json({ membershipIds: ['nope'] })]).directory.teamRepsOf(ORG, MEM)
   ).rejects.toMatchObject(unavailable)
 })
+
+test('onlineRepsOfTeam posts the Team and returns the ring members', async () => {
+  const rep = `mem_${'e'.repeat(32)}`
+  const { directory, calls } = setup([json({ membershipIds: [rep] })])
+  expect(await directory.onlineRepsOfTeam(ORG, TEAM)).toEqual([rep])
+  expect(calls[0]?.url).toBe('http://core.test/internal/v1/directory/team-ring-members')
+  expect(calls[0]?.headers.get('authorization')).toBe('Bearer secret-token-0123456789')
+  expect(calls[0]?.body).toEqual({ organizationId: ORG, teamId: TEAM })
+})
+
+test('onlineRepsOfTeam fails closed on a 5xx after retries, a refusal or a malformed body', async () => {
+  const down = setup([json({}, 503)])
+  await expect(down.directory.onlineRepsOfTeam(ORG, TEAM)).rejects.toMatchObject(unavailable)
+  expect(down.calls).toHaveLength(3)
+  await expect(setup([json({}, 403)]).directory.onlineRepsOfTeam(ORG, TEAM)).rejects.toMatchObject(
+    unavailable
+  )
+  await expect(
+    setup([json({ membershipIds: ['nope'] })]).directory.onlineRepsOfTeam(ORG, TEAM)
+  ).rejects.toMatchObject(unavailable)
+})
+
+test('onlineRepsOfTeam fails closed on a timeout', async () => {
+  const slow = createCoreHttpOrganizationDirectory({
+    baseUrl: 'http://core.test',
+    token: 'secret-token-0123456789',
+    fetch: ((_: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) =>
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+      )) as typeof fetch,
+    timeoutMs: 5,
+    retries: 0,
+  })
+  await expect(slow.onlineRepsOfTeam(ORG, TEAM)).rejects.toMatchObject(unavailable)
+})
