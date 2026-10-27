@@ -25,6 +25,12 @@ export function createMemoryAgentTurnStore(now: () => Date = () => new Date()): 
         .sort((a, b) => a.index - b.index)
       return structuredClone(turns.slice(-size))
     },
+    async range(organizationId, conversation, from, to) {
+      const turns = [...(byConversation.get(keyOf(organizationId, conversation))?.values() ?? [])]
+        .filter((turn) => turn.index >= from && turn.index <= to)
+        .sort((a, b) => a.index - b.index)
+      return structuredClone(turns.slice(0, MAX_RECENT_TURNS))
+    },
     async append(organizationId, conversation, turn: NewAgentTurn) {
       const key = keyOf(organizationId, conversation)
       const turns = byConversation.get(key) ?? new Map<number, StoredAgentTurn>()

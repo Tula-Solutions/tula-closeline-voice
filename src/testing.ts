@@ -61,6 +61,7 @@ const DEPLOYED_ENV: Readonly<Record<string, string>> = {
   STORAGE_BUCKET: 'closeline-voice-test',
   CORE_INTERNAL_URL: 'https://core.test',
   CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
+  INTERNAL_API_TOKENS: 'voice-internal-token-0123456789-abcdefgh',
   PLAYBOOK_INTERNAL_URL: 'https://playbook.internal',
   PLAYBOOK_INTERNAL_TOKEN: 'playbook-internal-token-0123456789',
   TELEPHONY_PROVIDER: 'twilio',
