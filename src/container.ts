@@ -7,17 +7,21 @@ import {
   createRemoteKeySet,
   createTokenVerifier,
   createTwilioTelephony,
+  type LlmPort,
   type LogDestination,
   type Logger,
   systemClock,
   type TelephonyPort,
   type TokenVerifier,
 } from 'tula-closeline-kit'
+import { createBedrockLlm } from 'tula-closeline-kit/llm'
 import { createMemoryTelephony } from 'tula-closeline-kit/testing'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
+import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
 import { createPostgresAgentSettingsStore } from '~/adapters/postgres/agent-settings-store'
+import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-store'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
@@ -26,6 +30,7 @@ import { createPostgresQualificationQuestionStore } from '~/adapters/postgres/qu
 import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
 import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import {
+  createUnconfiguredEvidenceSearch,
   createUnconfiguredNumberProvisioner,
   createUnconfiguredOrganizationDirectory,
 } from '~/adapters/unconfigured'
@@ -33,8 +38,10 @@ import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
 import type { AgentSettingsStore } from '~/ports/agent-settings-store'
+import type { AgentTurnStore } from '~/ports/agent-turn-store'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
+import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
@@ -73,6 +80,12 @@ export type Container = {
   agentSettings: AgentSettingsStore
   /** The Qualification questions of every Organization, in the order the Agent asks them. */
   questions: QualificationQuestionStore
+  /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
+  turns: AgentTurnStore
+  /** Finds an Organization's own Documents and Moments for the Agent to answer from. */
+  evidence: EvidenceSearch
+  /** The language model the Agent writes its replies with. */
+  llm: LlmPort
   /** The stored answers of requests sent with an `Idempotency-Key`, per Organization and user. */
   idempotency: IdempotencyStore
   /** Buys, ports and releases numbers at the telephony provider. */
@@ -156,6 +169,11 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
   })
 }
 
+/** The Bedrock model adapter, in the Region the service runs in. */
+function createLlm(env: Env, logger: Logger): LlmPort {
+  return createBedrockLlm({ region: env.AWS_REGION, logger })
+}
+
 /** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */
 function createDirectory(env: Env): OrganizationDirectory {
   if (env.CORE_INTERNAL_URL && env.CORE_INTERNAL_TOKEN) {
@@ -205,6 +223,14 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     lines: createPostgresLineStore(database.db),
     agentSettings: createPostgresAgentSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
+    turns: createPostgresAgentTurnStore(database.db),
+    // The Playbook has no route the Agent can call with a service credential yet, so a deployed
+    // run answers nothing from Documents. Only a local run gets the (empty) in-memory search.
+    evidence:
+      env.ENVIRONMENT === 'local'
+        ? createMemoryEvidenceSearch()
+        : createUnconfiguredEvidenceSearch(),
+    llm: createLlm(env, logger),
     idempotency: createPostgresIdempotencyStore(database.db),
     // The in-memory provisioner is local-only (the env schema rejects it elsewhere); a deployment
     // on `twilio` has no number adapter yet, so buying, porting and releasing fail closed.
