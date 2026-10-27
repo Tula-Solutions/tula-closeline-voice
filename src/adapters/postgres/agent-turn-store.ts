@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lt, type SQL } from 'drizzle-orm'
+import { and, desc, eq, inArray, lt, type SQL } from 'drizzle-orm'
 import { AGENT_TOOLS, formatId } from 'tula-closeline-contract'
 import { type Database, withOrganization } from 'tula-closeline-db'
 import { voiceAgentTurnSources, voiceAgentTurns } from 'tula-closeline-db/schema'
@@ -105,9 +105,9 @@ export function createPostgresAgentTurnStore(db: Database): AgentTurnStore {
               lt(voiceAgentTurns.turnIndex, before)
             )
           )
-          .orderBy(asc(voiceAgentTurns.turnIndex))
-          .limit(MAX_RECENT_TURNS * 4)
-        const latest = rows.slice(-size)
+          .orderBy(desc(voiceAgentTurns.turnIndex))
+          .limit(size)
+        const latest = rows.reverse()
         if (latest.length === 0) {
           return []
         }

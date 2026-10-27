@@ -24,8 +24,8 @@ export type ConversationDeps = Pick<
 export const MIN_EVIDENCE_PASSAGES = 1
 
 /**
- * The lowest similarity a Document passage may have and still count as evidence. A starting value:
- * the Playbook gives no threshold, so tune it against real Documents.
+ * The lowest similarity a Document passage may have and still count as evidence.
+ * shortcut: 0.5 is a guess, not measured; tune it against real Playbook scores once the Agent can search.
  */
 export const MIN_EVIDENCE_SCORE = 0.5
 

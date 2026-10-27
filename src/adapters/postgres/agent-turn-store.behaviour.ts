@@ -59,6 +59,17 @@ export function agentTurnStoreBehaviour(name: string, make: () => AgentTurnStore
       expect(await store.recent(org, c, 10, 10)).toHaveLength(1)
     })
 
+    test('recent stays at the latest turns in a long conversation', async () => {
+      const store = make()
+      const org = newOrganizationId()
+      const c = newTrySession()
+      for (let i = 0; i < 260; i += 1) {
+        await store.append(org, c, turn(i))
+      }
+      const recent = await store.recent(org, c, 260, 3)
+      expect(recent.map((t) => t.index)).toEqual([257, 258, 259])
+    })
+
     test('recent returns the latest turns below the bound, oldest first', async () => {
       const store = make()
       const org = newOrganizationId()

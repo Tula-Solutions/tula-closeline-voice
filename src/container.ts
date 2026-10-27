@@ -169,12 +169,12 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
   })
 }
 
-/** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */
 /** The Bedrock model adapter, in the Region the service runs in. */
 function createLlm(env: Env, logger: Logger): LlmPort {
   return createBedrockLlm({ region: env.AWS_REGION, logger })
 }
 
+/** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */
 function createDirectory(env: Env): OrganizationDirectory {
   if (env.CORE_INTERNAL_URL && env.CORE_INTERNAL_TOKEN) {
     return createCoreHttpOrganizationDirectory({
