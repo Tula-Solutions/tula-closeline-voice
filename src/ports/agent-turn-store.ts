@@ -45,6 +45,16 @@ export type AgentTurnStore = {
     limit: number
   ) => Promise<StoredAgentTurn[]>
   /**
+   * The turns with an index from `from` to `to` (both included), oldest first, at most
+   * {@link MAX_RECENT_TURNS}; a missing index is simply absent. Sources are not read.
+   */
+  range: (
+    organizationId: string,
+    conversation: ConversationRef,
+    from: number,
+    to: number
+  ) => Promise<StoredAgentTurn[]>
+  /**
    * Stores the turn and its sources together. When a turn already exists at that index nothing is
    * written and the stored one is returned with `created: false`, whatever the new one says.
    */

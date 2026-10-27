@@ -17,6 +17,7 @@ test('configuration falls back to defaults for everything but the environment', 
     AUTH_AUDIENCE: 'closeline',
     AWS_REGION: 'us-east-1',
     TELEPHONY_PROVIDER: 'memory',
+    INTERNAL_API_TOKENS: ['local-voice-internal-secret-not-for-deploys'],
     TWILIO_PURGE_INTERVAL_MS: 900_000,
     TWILIO_PURGE_MAX_ORGANIZATIONS: 200,
     TWILIO_PURGE_QUERY_TIMEOUT_MS: 10_000,
@@ -43,6 +44,7 @@ const DEPLOYED = {
   STORAGE_BUCKET: 'closeline-voice-recordings',
   CORE_INTERNAL_URL: 'https://core.internal',
   CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
+  INTERNAL_API_TOKENS: 'voice-internal-token-0123456789-abcdefgh',
   PLAYBOOK_INTERNAL_URL: 'https://playbook.internal',
   PLAYBOOK_INTERNAL_TOKEN: 'playbook-internal-token-0123456789',
   TELEPHONY_PROVIDER: 'twilio',
@@ -183,4 +185,20 @@ test('twilio needs its credentials and an https origin to be reached on', () => 
       TWILIO_REGION: 'ie1',
     })
   ).toMatchObject({ TWILIO_REGION: 'ie1' })
+})
+
+test('internal secrets are bounded and the public local default is refused outside local', () => {
+  const at = (value: string, environment = 'local') =>
+    loadEnv({ ENVIRONMENT: environment, INTERNAL_API_TOKENS: value })
+  const good = 'a'.repeat(32)
+  expect(at(`${good},${'b'.repeat(40)}`).INTERNAL_API_TOKENS).toEqual([good, 'b'.repeat(40)])
+  expect(() => at('short')).toThrow()
+  expect(() => at(`${good},`)).toThrow()
+  expect(() => at(`${good} x`)).toThrow()
+  expect(() => at(Array(6).fill(good).join(','))).toThrow()
+  expect(() => at('local-voice-internal-secret-not-for-deploys', 'prod')).toThrow()
+})
+
+test('a deployed environment without internal secrets fails at boot', () => {
+  expect(() => loadEnv({ ENVIRONMENT: 'dev' })).toThrow(/INTERNAL_API_TOKENS is required/)
 })

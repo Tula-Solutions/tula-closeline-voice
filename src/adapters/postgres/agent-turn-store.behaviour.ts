@@ -29,6 +29,18 @@ export function turn(index: number, over: Partial<NewAgentTurn> = {}): NewAgentT
 /** The behaviour every {@link AgentTurnStore} must show, run against each adapter. */
 export function agentTurnStoreBehaviour(name: string, make: () => AgentTurnStore): void {
   describe(`AgentTurnStore (${name})`, () => {
+    test('range reads the turns between two indexes, oldest first, skipping gaps', async () => {
+      const store = make()
+      const org = newOrganizationId()
+      const c = newTrySession()
+      for (const index of [0, 1, 2, 4, 5]) {
+        await store.append(org, c, turn(index))
+      }
+      const indexes = (await store.range(org, c, 1, 4)).map((found) => found.index)
+      expect(indexes).toEqual([1, 2, 4])
+      expect(await store.range(newOrganizationId(), c, 0, 9)).toEqual([])
+    })
+
     test('stores a turn with its sources in order and reads it back', async () => {
       const store = make()
       const org = newOrganizationId()

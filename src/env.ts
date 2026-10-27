@@ -16,6 +16,17 @@ const LOCAL_DEFAULTS = {
   TELEPHONY_PROVIDER: 'memory',
 } as const
 
+/** The internal secret a local run accepts when none is set (ADR 0013); refused everywhere else. */
+export const LOCAL_INTERNAL_API_TOKEN = 'local-voice-internal-secret-not-for-deploys'
+
+/** Bounds of the internal secrets: two is a rotation, more is a mistake. */
+const MAX_INTERNAL_TOKENS = 5
+const MIN_INTERNAL_TOKEN_LENGTH = 32
+const MAX_INTERNAL_TOKEN_LENGTH = 512
+
+/** A secret is printable ASCII with no space, so it travels in a bearer header unchanged. */
+const PRINTABLE_ASCII = /^[!-~]+$/
+
 /** The keys that must be set in every environment but `local`, where they have defaults. */
 const REQUIRED_OUTSIDE_LOCAL = [
   'REGION',
@@ -31,6 +42,7 @@ const REQUIRED_OUTSIDE_LOCAL = [
   'CORE_INTERNAL_TOKEN',
   'PLAYBOOK_INTERNAL_URL',
   'PLAYBOOK_INTERNAL_TOKEN',
+  'INTERNAL_API_TOKENS',
 ] as const
 
 /** The Twilio keys a `twilio` provider cannot run without. */
@@ -127,6 +139,16 @@ const schema = z
      * Required with `PLAYBOOK_INTERNAL_URL`.
      */
     PLAYBOOK_INTERNAL_TOKEN: z.string().min(16).max(512).optional(),
+    /**
+     * The bearer secrets callers of `/internal/v1/*` may present, comma separated (ADR 0013); more
+     * than one lets a secret be rotated without downtime. Each is 32 to 512 printable characters.
+     * Required outside `local`, where the public local default is used when unset. Credentials:
+     * never log them.
+     */
+    INTERNAL_API_TOKENS: z
+      .string()
+      .max(MAX_INTERNAL_TOKENS * (MAX_INTERNAL_TOKEN_LENGTH + 1))
+      .optional(),
     /** The Twilio region of the account's API keys; omit for the US default. */
     TWILIO_REGION: z.enum(TWILIO_REGIONS).optional(),
     /**
@@ -164,6 +186,37 @@ const schema = z
           message: 'TELEPHONY_PROVIDER memory is accepted only when ENVIRONMENT is local',
         })
       }
+    }
+    if (env.INTERNAL_API_TOKENS !== undefined) {
+      const entries = env.INTERNAL_API_TOKENS.split(',')
+      // Messages name the position, never the secret.
+      if (entries.length > MAX_INTERNAL_TOKENS) {
+        context.addIssue({
+          code: 'custom',
+          path: ['INTERNAL_API_TOKENS'],
+          message: `at most ${MAX_INTERNAL_TOKENS} secrets`,
+        })
+      }
+      entries.forEach((entry, index) => {
+        if (
+          entry.length < MIN_INTERNAL_TOKEN_LENGTH ||
+          entry.length > MAX_INTERNAL_TOKEN_LENGTH ||
+          !PRINTABLE_ASCII.test(entry)
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['INTERNAL_API_TOKENS'],
+            message: `secret ${index + 1} must be ${MIN_INTERNAL_TOKEN_LENGTH} to ${MAX_INTERNAL_TOKEN_LENGTH} characters, with no empty entry or spaces`,
+          })
+        }
+        if (env.ENVIRONMENT !== 'local' && entry === LOCAL_INTERNAL_API_TOKEN) {
+          context.addIssue({
+            code: 'custom',
+            path: ['INTERNAL_API_TOKENS'],
+            message: `secret ${index + 1} is the public local default, accepted only when ENVIRONMENT is local`,
+          })
+        }
+      })
     }
     if ((env.CORE_INTERNAL_URL === undefined) !== (env.CORE_INTERNAL_TOKEN === undefined)) {
       const missing =
@@ -287,6 +340,8 @@ const schema = z
         env.TELEPHONY_PROVIDER,
         LOCAL_DEFAULTS.TELEPHONY_PROVIDER
       ),
+      INTERNAL_API_TOKENS: (env.INTERNAL_API_TOKENS?.split(',') ??
+        (local ? [LOCAL_INTERNAL_API_TOKEN] : [])) as readonly string[],
     }
   })
 

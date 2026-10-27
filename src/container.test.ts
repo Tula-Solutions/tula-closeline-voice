@@ -129,6 +129,7 @@ const DEPLOYED_SOURCE = {
   STORAGE_BUCKET: 'closeline-voice-recordings',
   CORE_INTERNAL_URL: 'https://core.internal',
   CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
+  INTERNAL_API_TOKENS: 'voice-internal-token-0123456789-abcdefgh',
   PLAYBOOK_INTERNAL_URL: 'https://playbook.internal',
   PLAYBOOK_INTERNAL_TOKEN: 'playbook-internal-token-0123456789',
 }
