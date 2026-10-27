@@ -99,6 +99,7 @@ export type AnswerOutcome =
   | { kind: 'live'; call: StoredCall }
   | { kind: 'not_answerable' }
   | { kind: 'disclosure_failed' }
+  | { kind: 'greeting_failed' }
 
 /**
  * The Agent answers a ringing inbound Call nobody else holds. The Disclosure comes first: the Call
@@ -180,15 +181,22 @@ export async function answer(
   if (live === undefined) {
     return { kind: 'not_answerable' }
   }
-  const settings = (await deps.agentSettings.get(organizationId)) ?? DEFAULT_AGENT_SETTINGS
-  await speakText(
-    deps,
-    organizationId,
-    settings.voiceStyle,
-    settings.greeting,
-    input.sink,
-    undefined
-  )
+  try {
+    const settings = (await deps.agentSettings.get(organizationId)) ?? DEFAULT_AGENT_SETTINGS
+    await speakText(
+      deps,
+      organizationId,
+      settings.voiceStyle,
+      settings.greeting,
+      input.sink,
+      undefined
+    )
+  } catch {
+    // Nobody drives a live Call that cannot greet, and only a turn checks the caps: end it now.
+    deps.logger.error('agent call greeting failed', { callId })
+    await end(deps, organizationId, live, 'agent_ended')
+    return { kind: 'greeting_failed' }
+  }
   return { kind: 'live', call: live }
 }
 
@@ -260,6 +268,11 @@ async function end(
   deps.logger.info('agent call ended', { callId: call.id, endReason })
 }
 
+/** Clamps a reported duration to a finite, non-negative number so it can never subtract or poison a cost. */
+function safeSeconds(seconds: number): number {
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0
+}
+
 /** What the Agent costs for one exchange, in micro-cents, from the prices in the environment. */
 function costOf(
   deps: AgentCallDeps,
@@ -267,7 +280,7 @@ function costOf(
 ): number {
   const { env } = deps
   return Math.ceil(
-    parts.audioSeconds * env.STT_PRICE_MICRO_CENTS_PER_SECOND +
+    safeSeconds(parts.audioSeconds) * env.STT_PRICE_MICRO_CENTS_PER_SECOND +
       parts.characters * env.TTS_PRICE_MICRO_CENTS_PER_CHARACTER +
       parts.usage.inputTokens * env.LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN +
       parts.usage.outputTokens * env.LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN

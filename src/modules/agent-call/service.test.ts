@@ -192,7 +192,43 @@ describe('the Disclosure comes first on an Agent Call', () => {
   })
 })
 
+describe('a failure after the Call is live', () => {
+  test('a greeting that throws ends the Call as agent_ended and hangs up', async () => {
+    const call = await ringing()
+    t.agentSettings.get = async () => {
+      throw new Error('settings store down: secret words')
+    }
+    const outcome = await AgentCall.answer(deps, {
+      organizationId: org,
+      callId: call.id,
+      providerCallId: call.providerCallId,
+      sink,
+    })
+    expect(outcome.kind).toBe('greeting_failed')
+    expect(await t.calls.get(org, call.id)).toMatchObject({
+      state: 'ended',
+      endReason: 'agent_ended',
+    })
+    expect(telephony.operations.map((operation) => operation.operation)).toContain('hangUp')
+    expect(t.logLines.join('\n')).not.toContain('secret words')
+    expect(t.llm.requests()).toHaveLength(0)
+  })
+})
+
 describe('the speech loop', () => {
+  test.each([Number.NaN, -5, Number.POSITIVE_INFINITY])(
+    'audioSeconds %p never adds a negative or non-finite cost',
+    async (audioSeconds) => {
+      const call = await live()
+      t.llm.reply({ text: reply(), inputTokens: 0, outputTokens: 0 })
+      tts.speak([AUDIO])
+      tts.speak([AUDIO])
+      await say(call.id, { audioSeconds })
+      const chars = [...ONE].length + [...TWO].length
+      expect((await t.calls.get(org, call.id))?.agentCostMicroCents).toBe(chars * 1500)
+    }
+  )
+
   test('replies in speech and stores the reply and its cost', async () => {
     const call = await live()
     t.llm.reply({ text: reply(), inputTokens: 100, outputTokens: 20 })
