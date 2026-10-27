@@ -101,3 +101,25 @@ test('a request outside the contract bounds never leaves the process', async () 
   await expect(search.search(ORG, TURNS, 99)).rejects.toMatchObject({ code: 'server.unavailable' })
   expect(seen).toHaveLength(0)
 })
+
+test('a body that stalls after the headers is server.timeout and is retried', async () => {
+  const stall = () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{'))
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    )
+  const { search, seen } = fake([stall])
+  await expect(search.search(ORG, TURNS, 5)).rejects.toMatchObject({ code: 'server.timeout' })
+  expect(seen).toHaveLength(2)
+})
+
+test('it does not wait for Retry-After after the last attempt', async () => {
+  const { search, sleeps } = fake([status(503, { 'retry-after': '1' })])
+  await search.search(ORG, TURNS, 5).catch(() => {})
+  // one backoff before the retry, one Retry-After wait after the first attempt; none after the last
+  expect(sleeps).toHaveLength(2)
+})

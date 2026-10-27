@@ -33,6 +33,13 @@ export type PlaybookHttpOptions = {
   random?: () => number
 }
 
+const rethrowTimeout = (error: unknown): undefined => {
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    throw error
+  }
+  return undefined
+}
+
 const fail = (code: 'server.unavailable' | 'server.timeout'): AppError =>
   new AppError({
     code: ERRORS[code].code,
@@ -59,7 +66,7 @@ export function createPlaybookHttpEvidenceSearch(options: PlaybookHttpOptions): 
   async function attempt(
     organizationId: string,
     body: string
-  ): Promise<Response | { retry: AppError; waitMs: number }> {
+  ): Promise<{ status: number; data: unknown } | { retry: AppError; waitMs: number }> {
     try {
       const response = await doFetch(url, {
         method: 'POST',
@@ -79,7 +86,12 @@ export function createPlaybookHttpEvidenceSearch(options: PlaybookHttpOptions): 
         const waitMs = Number.isFinite(seconds) ? Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS) : 0
         return { retry: fail('server.unavailable'), waitMs: Math.max(waitMs, 0) }
       }
-      return response
+      // Read the body here so a stall after the headers hits the same timeout and retry path.
+      const data = response.status === 200 ? await response.json().catch(rethrowTimeout) : undefined
+      if (response.status !== 200) {
+        await response.body?.cancel().catch(() => {})
+      }
+      return { status: response.status, data }
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'TimeoutError'
       return { retry: fail(timedOut ? 'server.timeout' : 'server.unavailable'), waitMs: 0 }
@@ -99,25 +111,18 @@ export function createPlaybookHttpEvidenceSearch(options: PlaybookHttpOptions): 
           await sleep(BACKOFF_BASE_MS * 2 ** (n - 1) * (0.5 + random() / 2))
         }
         const result = await attempt(organizationId, body)
-        if (!(result instanceof Response)) {
+        if ('retry' in result) {
           last = result.retry
-          if (result.waitMs > 0) {
+          if (result.waitMs > 0 && n < retries) {
             await sleep(result.waitMs)
           }
           continue
         }
         if (result.status === 504) {
-          await result.body?.cancel().catch(() => {})
           throw fail('server.timeout')
         }
-        if (!result.ok) {
-          await result.body?.cancel().catch(() => {})
-          throw fail('server.unavailable')
-        }
-        const parsed = searchDocumentsResponseSchema.safeParse(
-          await result.json().catch(() => undefined)
-        )
-        if (!parsed.success) {
+        const parsed = searchDocumentsResponseSchema.safeParse(result.data)
+        if (result.status !== 200 || !parsed.success) {
           throw fail('server.unavailable')
         }
         // shortcut: the Playbook has no internal Moments route yet, so none are returned; add the
