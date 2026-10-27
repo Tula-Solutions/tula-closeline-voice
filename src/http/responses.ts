@@ -38,3 +38,10 @@ export function optionalIdempotencyKeyHeader(description: string) {
     [IDEMPOTENCY_KEY_HEADER.toLowerCase()]: idempotencyKeySchema.optional().meta({ description }),
   })
 }
+
+/** The required `Idempotency-Key` header of a `POST` that spends money, described in `description`. */
+export function requiredIdempotencyKeyHeader(description: string) {
+  return z.object({
+    'idempotency-key': idempotencyKeySchema.meta({ description }),
+  })
+}
