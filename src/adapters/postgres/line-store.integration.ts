@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
+import { sql } from 'drizzle-orm'
 import { formatId, type OrganizationId } from 'tula-closeline-contract'
-import { createDb } from 'tula-closeline-db'
+import { createDb, withOrganization } from 'tula-closeline-db'
 import { integrationUrls } from '~/integration-support'
 import { type LineCursor, type NewLine, NumberTakenError } from '~/ports/line-store'
 import { createPostgresLineStore } from './line-store'
@@ -126,5 +127,27 @@ describe('the Postgres Line store', () => {
     await store.release(org, line.id, new Date())
     await store.clearProviderSid(org, line.id)
     expect((await store.get(org, line.id))?.providerSid).toBeNull()
+  })
+
+  test('finds the active Line behind a number, with its Organization', async () => {
+    const org = newOrganization()
+    // The lookup answers only for an active Organization, which core owns; seed one as the owner.
+    const owner = createDb(integrationUrls().owner)
+    await withOrganization(owner.db, org, async (tx) => {
+      await tx.execute(
+        sql`insert into core.organizations (organization_id, name, region) values (${org}, 'Test', 'us')`
+      )
+      await tx.execute(
+        sql`insert into core.memberships (id, organization_id, user_id, role, email)
+            values (${formatId('mem', crypto.randomUUID())}, ${org}, ${formatId('usr', crypto.randomUUID())}, 'owner', 'owner@example.test')`
+      )
+    })
+    await owner.close()
+    const input = newLine(new Date())
+    await store.insert(org, input)
+    const found = await store.byNumber(input.number)
+    expect(found?.organizationId).toBe(org)
+    expect(found?.line.id).toBe(input.id)
+    expect(await store.byNumber(randomNumber())).toBeUndefined()
   })
 })

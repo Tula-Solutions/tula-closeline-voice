@@ -6,6 +6,8 @@ export type OrganizationDirectory = {
   isRep: (organizationId: string, membershipId: string) => Promise<boolean>
   /** The Membership id the User holds in the Organization, or undefined when they hold none. */
   membershipOf: (organizationId: string, userId: string) => Promise<string | undefined>
+  /** The Membership ids of the Team's Reps who are online to take a Call (at most 50). */
+  onlineRepsOfTeam: (organizationId: string, teamId: string) => Promise<string[]>
   /** The Membership ids of the Reps on every Team the Manager manages (at most 500). */
   teamRepsOf: (organizationId: string, managerMembershipId: string) => Promise<string[]>
 }

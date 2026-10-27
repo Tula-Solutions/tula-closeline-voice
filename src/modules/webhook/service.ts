@@ -3,10 +3,13 @@ import { MAX_WEBHOOK_BODY_BYTES } from 'tula-closeline-kit'
 import { z } from 'zod'
 import type { Container } from '~/container'
 import { domainError } from '~/http/domain-error'
+import type { CallDeps } from '~/modules/call/service'
+import * as Calls from '~/modules/call/service'
 import { mapRecordingCallback, mapStatusCallback } from './mapping'
 
 /** What the webhook service needs from the container. */
-export type WebhookDeps = Pick<Container, 'telephony' | 'callEvents' | 'clock' | 'logger' | 'env'>
+export type WebhookDeps = Pick<Container, 'telephony' | 'callEvents' | 'clock' | 'logger' | 'env'> &
+  CallDeps
 
 /** Which of the provider's callbacks arrived. */
 export type CallbackKind = 'status' | 'recording'
@@ -42,6 +45,58 @@ export function isOversize(body: string): boolean {
 }
 
 /**
+ * Checks size and signature of a callback and returns the URL the signature covers. The signed URL
+ * is the one the provider was configured with, not the Host header of a request that came through
+ * a load balancer.
+ */
+function verified(deps: WebhookDeps, kind: string, callback: RawCallback): string {
+  if (isOversize(callback.body)) {
+    throw domainError(ERRORS['request.too_large'])
+  }
+  const url = `${deps.env.WEBHOOK_BASE_URL ?? 'http://localhost'}${callback.pathAndQuery}`
+  if (!deps.telephony.verifyWebhook({ url, body: callback.body, signature: callback.signature })) {
+    // Only the kind is logged: the body holds phone numbers and the signature is a credential.
+    deps.logger.warn('webhook refused: bad signature', { callback: kind })
+    throw domainError(ERRORS['auth.forbidden'])
+  }
+  return url
+}
+
+const inboundFormSchema = z.object({
+  CallSid: z.string().min(1).max(64),
+  From: z.string().min(1).max(32),
+  To: z.string().min(1).max(32),
+})
+
+/**
+ * Handles the provider's notice that a Prospect is calling one of our numbers. The signature is
+ * checked first. A number that is no active Line is ignored (a retired Line gets no ring); any
+ * other notice rings the Line's Reps once, however often the provider retries it.
+ */
+export async function receiveInbound(
+  deps: WebhookDeps,
+  callback: RawCallback
+): Promise<Awaited<ReturnType<typeof Calls.ringInbound>> | 'ignored'> {
+  verified(deps, 'inbound', callback)
+  const form = inboundFormSchema.safeParse(Object.fromEntries(new URLSearchParams(callback.body)))
+  if (!form.success) {
+    throw domainError(ERRORS['request.invalid'])
+  }
+  const found = await deps.lines.byNumber(form.data.To)
+  if (found === undefined) {
+    return 'ignored'
+  }
+  return Calls.ringInbound(deps, {
+    organizationId: found.organizationId as Parameters<
+      typeof Calls.ringInbound
+    >[1]['organizationId'],
+    line: found.line,
+    providerCallSid: form.data.CallSid,
+    callerNumber: form.data.From,
+  })
+}
+
+/**
  * Handles one provider callback. The signature is checked first, over the URL the provider was
  * given, so an unsigned request reaches neither the parser nor the store. The Call log is then
  * appended to once per provider event id, so a redelivery changes nothing.
@@ -51,17 +106,7 @@ export async function receive(
   kind: CallbackKind,
   callback: RawCallback
 ): Promise<CallbackOutcome> {
-  if (isOversize(callback.body)) {
-    throw domainError(ERRORS['request.too_large'])
-  }
-  // The signed URL is the one the provider was configured with, not the Host header of a request
-  // that came through a load balancer.
-  const url = `${deps.env.WEBHOOK_BASE_URL ?? 'http://localhost'}${callback.pathAndQuery}`
-  if (!deps.telephony.verifyWebhook({ url, body: callback.body, signature: callback.signature })) {
-    // Only the kind is logged: the body holds phone numbers and the signature is a credential.
-    deps.logger.warn('webhook refused: bad signature', { callback: kind })
-    throw domainError(ERRORS['auth.forbidden'])
-  }
+  const url = verified(deps, kind, callback)
 
   const query = callbackQuerySchema.safeParse(
     Object.fromEntries(new URL(url).searchParams.entries())

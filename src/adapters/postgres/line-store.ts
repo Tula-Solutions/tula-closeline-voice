@@ -1,6 +1,6 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm'
 import { lineSchema } from 'tula-closeline-contract'
-import { type Database, type Transaction, withOrganization } from 'tula-closeline-db'
+import { type Database, lineForNumber, type Transaction, withOrganization } from 'tula-closeline-db'
 import { voiceLines } from 'tula-closeline-db/schema'
 import { transactionOf } from '~/adapters/postgres/idempotency-store'
 import { type LineStore, NumberTakenError, type StoredLine } from '~/ports/line-store'
@@ -113,6 +113,21 @@ export function createPostgresLineStore(db: Database): LineStore {
           .limit(query.limit)
       )
       return rows.map(toStored)
+    },
+
+    async byNumber(number) {
+      // The SECURITY DEFINER function is the one cross-Organization read; the Line itself is then
+      // read through the Organization's own scope.
+      const found = await lineForNumber(db, number)
+      if (found === null) {
+        return undefined
+      }
+      const [row] = await withOrganization(db, found.organizationId, (tx) =>
+        tx.select().from(voiceLines).where(one(found.organizationId, found.lineId)).limit(1)
+      )
+      return row === undefined
+        ? undefined
+        : { organizationId: found.organizationId, line: toStored(row) }
     },
 
     async get(organizationId, id) {

@@ -23,6 +23,7 @@ import { domainError } from '~/http/domain-error'
 import type { Caller } from '~/modules/caller'
 import { type IdempotentAnswer, idempotent, requestHash } from '~/modules/idempotency/service'
 import { InvalidTransitionError, type StoredCall } from '~/ports/call-store'
+import type { StoredLine } from '~/ports/line-store'
 
 /** What the Call service needs from the container. */
 export type CallDeps = Pick<
@@ -35,6 +36,7 @@ export type CallDeps = Pick<
   | 'logger'
   | 'idempotency'
   | 'numberTimeoutMs'
+  | 'env'
 >
 
 /** The route name a place-Call `Idempotency-Key` is stored under. */
@@ -168,13 +170,13 @@ async function lineFor(
 /** Fails the Call, hangs the provider call up when there is one, and logs; never throws. */
 async function failCall(
   deps: CallDeps,
-  caller: Caller,
+  organizationId: Caller['organizationId'],
   call: StoredCall,
   failureReason: VoiceCallFailureReason,
   providerCallId: string | undefined
 ): Promise<void> {
   try {
-    await deps.calls.transition(caller.organizationId, call.id, {
+    await deps.calls.transition(organizationId, call.id, {
       to: 'failed',
       at: deps.clock.now(),
       failureReason,
@@ -186,19 +188,14 @@ async function failCall(
   }
   if (providerCallId !== undefined) {
     await withinDeadline(deps, (options) =>
-      deps.telephony.hangUp(
-        { organizationId: caller.organizationId, providerCallId, by: 'system' },
-        options
-      )
+      deps.telephony.hangUp({ organizationId, providerCallId, by: 'system' }, options)
     ).catch(() => deps.logger.warn('call.hangup.failed', { callId: call.id }))
   }
   deps.logger.warn('call.failed', { callId: call.id, reason: failureReason })
 }
 
 /**
- * Takes a `ringing` Call through the provider: place it, play the Disclosure, bridge the Rep's
- * browser and start the Recording, and only then mark it `live`. The Disclosure comes first on
- * every path and is stored before the Call can go live (ADR 0003). Returns the final Call.
+ * Takes a `ringing` outbound Call through the provider: place it, then {@link finish} it.
  */
 async function walk(
   deps: CallDeps,
@@ -210,7 +207,6 @@ async function walk(
 ): Promise<StoredCall> {
   const org = caller.organizationId
   let providerCallId: string | undefined
-  let phase: 'dial' | 'disclosure' | 'after' = 'dial'
   try {
     const placed = await withinDeadline(deps, (options) =>
       deps.telephony.placeCall(
@@ -221,6 +217,27 @@ async function walk(
     providerCallId = placed.providerCallId
     await deps.calls.setProviderCallSid(org, call.id, providerCallId)
     await deps.calls.transition(org, call.id, { to: 'connecting', at: deps.clock.now() })
+  } catch (error) {
+    await failCall(deps, org, call, reasonOf(error), providerCallId)
+    throw domainError(ERRORS['server.unavailable'])
+  }
+  return finish(deps, org, membershipId, call, providerCallId)
+}
+
+/**
+ * Takes a `connecting` Call, outbound or inbound, to `live`: play the Disclosure, bridge the Rep's
+ * browser and start the Recording. The Disclosure comes first on every path and is stored before
+ * the Call can go live (ADR 0003). Returns the final Call.
+ */
+async function finish(
+  deps: CallDeps,
+  org: Caller['organizationId'],
+  membershipId: string,
+  call: StoredCall,
+  providerCallId: string
+): Promise<StoredCall> {
+  let phase: 'start' | 'disclosure' | 'after' = 'start'
+  try {
     await deps.calls.transition(org, call.id, { to: 'disclosing', at: deps.clock.now() })
 
     phase = 'disclosure'
@@ -228,7 +245,7 @@ async function walk(
       deps.telephony.playDisclosure(
         {
           organizationId: org,
-          providerCallId: placed.providerCallId,
+          providerCallId,
           wordingVersion: DISCLOSURE_WORDING.version,
           text: DISCLOSURE_WORDING.text,
           aiAssisted: DISCLOSURE_WORDING.aiAssisted,
@@ -247,17 +264,14 @@ async function walk(
       deps.telephony.bridge(
         {
           organizationId: org,
-          providerCallId: placed.providerCallId,
+          providerCallId,
           repIdentity: membershipId as Parameters<typeof deps.telephony.bridge>[0]['repIdentity'],
         },
         options
       )
     )
     await withinDeadline(deps, (options) =>
-      deps.telephony.startRecording(
-        { organizationId: org, providerCallId: placed.providerCallId },
-        options
-      )
+      deps.telephony.startRecording({ organizationId: org, providerCallId }, options)
     )
     await deps.calls.recordRecordingStarted(org, call.id, deps.clock.now())
     const live = await deps.calls.transition(org, call.id, { to: 'live', at: deps.clock.now() })
@@ -266,10 +280,10 @@ async function walk(
     const reason: VoiceCallFailureReason =
       phase === 'disclosure'
         ? 'disclosure_failed'
-        : phase === 'dial'
+        : phase === 'start'
           ? reasonOf(error)
           : 'provider_error'
-    await failCall(deps, caller, call, reason, providerCallId)
+    await failCall(deps, org, call, reason, providerCallId)
     if (phase === 'disclosure') {
       throw domainError(VOICE_ERRORS['call.disclosure_failed'], { callId: call.id })
     }
@@ -447,4 +461,164 @@ export async function end(
     }
     throw error
   }
+}
+
+/** The most Reps one inbound Call rings, the telephony port's own cap on legs. */
+const MAX_RINGING_REPS = 50
+
+/**
+ * Records an inbound Call as `missed` and ends the provider call. Does nothing when the Call was
+ * answered or already missed, so the ring timer and a retry are both safe.
+ */
+async function miss(
+  deps: CallDeps,
+  organizationId: Caller['organizationId'],
+  call: StoredCall
+): Promise<void> {
+  // A Rep who claimed the Call (connecting) has won the race; only a still-ringing Call is missed.
+  if ((await deps.calls.get(organizationId, call.id))?.state !== 'ringing') {
+    return
+  }
+  try {
+    await deps.calls.transition(organizationId, call.id, { to: 'missed', at: deps.clock.now() })
+  } catch (error) {
+    if (error instanceof InvalidTransitionError) {
+      return
+    }
+    throw error
+  }
+  if (call.providerCallSid !== null) {
+    const providerCallId = call.providerCallSid
+    await withinDeadline(deps, (options) =>
+      deps.telephony.hangUp({ organizationId, providerCallId, by: 'system' }, options)
+    ).catch(() => deps.logger.warn('call.hangup.failed', { callId: call.id }))
+  }
+  deps.logger.info('call.missed', { callId: call.id })
+}
+
+/** The Memberships an inbound Call to the Line rings: its assigned Rep, or its Team's online Reps. */
+async function ringSet(
+  deps: CallDeps,
+  organizationId: Caller['organizationId'],
+  line: StoredLine
+): Promise<string[]> {
+  if (line.assignment.kind === 'rep') {
+    return [line.assignment.membershipId]
+  }
+  if (line.assignment.kind === 'team') {
+    return (await deps.directory.onlineRepsOfTeam(organizationId, line.assignment.teamId)).slice(
+      0,
+      MAX_RINGING_REPS
+    )
+  }
+  return []
+}
+
+/**
+ * Handles the provider's notice of an inbound Call to a Line: records it `ringing` once per
+ * provider call id, rings the Reps, and starts the ring timer. A redelivered notice is
+ * `duplicate` and changes nothing. With nobody to ring, or a provider that fails, the Call is
+ * recorded `missed` at once.
+ */
+export async function ringInbound(
+  deps: CallDeps,
+  inbound: {
+    organizationId: Caller['organizationId']
+    line: StoredLine
+    providerCallSid: string
+    callerNumber: string
+  }
+): Promise<'ringing' | 'missed' | 'duplicate'> {
+  const { organizationId, line } = inbound
+  const assigned = line.assignment.kind === 'rep' ? line.assignment.membershipId : null
+  const { call, created } = await deps.calls.insertInbound(organizationId, {
+    id: formatId('call', crypto.randomUUID()),
+    lineId: line.id,
+    repMembershipId: assigned,
+    callerNumber: inbound.callerNumber,
+    providerCallSid: inbound.providerCallSid,
+    createdAt: deps.clock.now(),
+  })
+  if (!created) {
+    return 'duplicate'
+  }
+  try {
+    const identities = await ringSet(deps, organizationId, line)
+    if (identities.length === 0) {
+      await miss(deps, organizationId, call)
+      return 'missed'
+    }
+    await withinDeadline(deps, (options) =>
+      deps.telephony.answerCall(
+        {
+          organizationId,
+          providerCallId: inbound.providerCallSid,
+          callId: call.id,
+          ringIdentities: identities as Parameters<
+            typeof deps.telephony.answerCall
+          >[0]['ringIdentities'],
+        },
+        options
+      )
+    )
+  } catch (error) {
+    deps.logger.warn('call.ring.failed', {
+      callId: call.id,
+      errorName: error instanceof Error ? error.name : 'unknown',
+    })
+    await miss(deps, organizationId, call)
+    return 'missed'
+  }
+  return 'ringing'
+}
+
+/**
+ * A Rep answers a ringing inbound Call. One conditional update in the store gives the Call to the
+ * first Rep; every later answer is `call.not_ringing`, except the winner's own repeat, which gets
+ * the Call as it is. The winner is then bridged after the Disclosure plays. A Rep who is not
+ * among those ringing, or in another Organization, finds no such Call.
+ */
+export async function answer(
+  deps: CallDeps,
+  caller: Caller,
+  id: VoiceCall['id']
+): Promise<VoiceCall> {
+  requireVoiceRole(caller)
+  const membershipId = await deps.directory.membershipOf(caller.organizationId, caller.userId)
+  const stored = await deps.calls.get(caller.organizationId, id)
+  const line =
+    stored === undefined ? undefined : await deps.lines.get(caller.organizationId, stored.lineId)
+  if (
+    membershipId === undefined ||
+    stored === undefined ||
+    stored.direction !== 'inbound' ||
+    line === undefined ||
+    !(await ringSet(deps, caller.organizationId, line)).includes(membershipId)
+  ) {
+    throw domainError(SALES_HISTORY_ERRORS['call.not_found'])
+  }
+  const claimed = await deps.calls.claimInbound(
+    caller.organizationId,
+    id,
+    membershipId,
+    deps.clock.now()
+  )
+  if (claimed === undefined) {
+    const current = await deps.calls.get(caller.organizationId, id)
+    if (current?.repMembershipId === membershipId && current.state !== 'missed') {
+      return toCall(current)
+    }
+    throw domainError(VOICE_ERRORS['call.not_ringing'])
+  }
+  if (claimed.providerCallSid === null) {
+    throw domainError(ERRORS['server.unavailable'])
+  }
+  const final = await finish(
+    deps,
+    caller.organizationId,
+    membershipId,
+    claimed,
+    claimed.providerCallSid
+  )
+  return toCall(final)
 }

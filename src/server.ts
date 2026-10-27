@@ -1,6 +1,7 @@
 import { createApp } from '~/app'
 import { createContainer } from '~/container'
 import { serveOptions } from '~/http/serve'
+import { startMissedSweep } from '~/modules/call/missed-sweep'
 import { startTwilioPurgeSchedule } from '~/modules/purge/start'
 import { shutdown } from '~/shutdown'
 
@@ -9,6 +10,8 @@ const app = createApp(container)
 const server = Bun.serve(serveOptions(container, app))
 // Only a deployment on the Postgres TwilioStore has a schedule; the timer is its only state.
 const purgeSchedule = startTwilioPurgeSchedule(container)
+// The ring timeout of an inbound Call is a database sweep, so any instance may miss any Call.
+const missedSweep = startMissedSweep(container)
 
 container.logger.info('listening', { port: server.port, environment: container.env.ENVIRONMENT })
 
@@ -27,7 +30,7 @@ function stop(signal: string): void {
         process.exit(code)
       }
       // The purge run in flight finishes before its database connections are released.
-      Promise.resolve(purgeSchedule?.stop())
+      Promise.all([purgeSchedule?.stop(), missedSweep.stop()])
         .then(() => container.close())
         .then(
           () => process.exit(0),

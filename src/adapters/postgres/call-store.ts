@@ -130,6 +130,119 @@ export function createPostgresCallStore(db: Database): CallStore {
       }
     },
 
+    async insertInbound(organizationId, call) {
+      return withOrganization(db, organizationId, async (tx) => {
+        // The unique index on (organization, provider call id) makes a redelivered webhook a no-op.
+        const [row] = await tx
+          .insert(voiceCalls)
+          .values({
+            id: call.id,
+            organizationId,
+            direction: 'inbound',
+            state: 'ringing',
+            lineId: call.lineId,
+            repMembershipId: call.repMembershipId,
+            prospectNumber: call.callerNumber,
+            providerCallSid: call.providerCallSid,
+            createdAt: call.createdAt,
+          })
+          .onConflictDoNothing()
+          .returning()
+        if (row === undefined) {
+          const [existing] = await tx
+            .select()
+            .from(voiceCalls)
+            .where(
+              and(
+                eq(voiceCalls.organizationId, organizationId),
+                eq(voiceCalls.providerCallSid, call.providerCallSid)
+              )
+            )
+            .limit(1)
+          if (existing === undefined) {
+            throw new Error('insert conflicted but found no Call')
+          }
+          return { call: toStored(existing), created: false }
+        }
+        await log(tx, organizationId, call.id, {
+          kind: 'state_changed',
+          fromState: null,
+          toState: 'ringing',
+          occurredAt: call.createdAt,
+        })
+        return { call: toStored(row), created: true }
+      })
+    },
+
+    async claimInbound(organizationId, id, repMembershipId, at) {
+      return withOrganization(db, organizationId, async (tx) => {
+        // One conditional update decides the race: only one statement finds the row `ringing`.
+        const [row] = await tx
+          .update(voiceCalls)
+          .set({ state: 'connecting', repMembershipId, updatedAt: sql`now()` })
+          .where(
+            and(
+              one(organizationId, id),
+              eq(voiceCalls.direction, 'inbound'),
+              eq(voiceCalls.state, 'ringing'),
+              sql`(${voiceCalls.repMembershipId} is null or ${voiceCalls.repMembershipId} = ${repMembershipId})`
+            )
+          )
+          .returning()
+        if (row === undefined) {
+          return undefined
+        }
+        await log(tx, organizationId, id, {
+          kind: 'state_changed',
+          fromState: 'ringing',
+          toState: 'connecting',
+          occurredAt: at,
+        })
+        return toStored(row)
+      })
+    },
+
+    async organizationsWithStaleRinging(before, after, limit) {
+      const result = await db.execute<{ organization_id: string }>(
+        sql`select organization_id from voice.orgs_with_stale_ringing(${before.toISOString()}::timestamptz, ${after}::text, ${limit}::int)`
+      )
+      return result.rows.map((row: { organization_id: string }) => row.organization_id)
+    },
+
+    async missStaleRinging(organizationId, before, at, limit) {
+      return withOrganization(db, organizationId, async (tx) => {
+        const stale = and(
+          eq(voiceCalls.organizationId, organizationId),
+          eq(voiceCalls.direction, 'inbound'),
+          eq(voiceCalls.state, 'ringing'),
+          lt(voiceCalls.createdAt, before)
+        )
+        // One conditional update: a Call claimed in the meantime is no longer `ringing`.
+        const rows = await tx
+          .update(voiceCalls)
+          .set({ state: 'missed', endedAt: at, updatedAt: sql`now()` })
+          .where(
+            and(
+              stale,
+              inArray(
+                voiceCalls.id,
+                tx.select({ id: voiceCalls.id }).from(voiceCalls).where(stale).limit(limit)
+              )
+            )
+          )
+          .returning()
+        for (const row of rows) {
+          await log(tx, organizationId, row.id, {
+            kind: 'state_changed',
+            fromState: 'ringing',
+            toState: 'missed',
+            occurredAt: at,
+          })
+        }
+        return rows.map(toStored)
+      })
+    },
+
     async get(organizationId, id) {
       const [row] = await withOrganization(db, organizationId, (tx) =>
         tx.select().from(voiceCalls).where(one(organizationId, id)).limit(1)

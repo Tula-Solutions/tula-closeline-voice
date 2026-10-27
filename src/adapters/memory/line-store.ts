@@ -72,6 +72,17 @@ export function createMemoryLineStore(): LineStore {
       return lines.slice(0, query.limit).map((line) => ({ ...line }))
     },
 
+    async byNumber(number) {
+      for (const [organizationId, rows] of byOrganization) {
+        for (const line of rows.values()) {
+          if (line.number === number && line.state === 'active') {
+            return { organizationId, line: { ...line } }
+          }
+        }
+      }
+      return undefined
+    },
+
     async get(organizationId, id) {
       const line = rowsOf(organizationId).get(id)
       return line === undefined ? undefined : { ...line }

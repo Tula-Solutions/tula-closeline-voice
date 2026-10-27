@@ -134,4 +134,122 @@ describe('the Postgres Call store', () => {
     expect(own).toHaveLength(2)
     expect(await calls.list(org, { limit: 10, repMembershipIds: [] })).toEqual([])
   })
+
+  test('an inbound insert is once per provider call id, and a repeat finds the first', async () => {
+    const org = newOrganization()
+    const base = await callFor(org)
+    const input = {
+      id: base.id,
+      lineId: base.lineId,
+      repMembershipId: null,
+      callerNumber: '+14155550123',
+      providerCallSid: `CA${crypto.randomUUID().replaceAll('-', '')}`,
+      createdAt: T0,
+    }
+    const first = await calls.insertInbound(org, input)
+    const again = await calls.insertInbound(org, {
+      ...input,
+      id: formatId('call', crypto.randomUUID()),
+    })
+    expect(first.created).toBe(true)
+    expect(first.call).toMatchObject({ direction: 'inbound', state: 'ringing' })
+    expect(again.created).toBe(false)
+    expect(again.call.id).toBe(first.call.id)
+    expect((await calls.events(org, first.call.id)).map((e) => e.kind)).toEqual(['state_changed'])
+  })
+
+  test('of many simultaneous claims of an inbound Call exactly one wins', async () => {
+    const org = newOrganization()
+    const base = await callFor(org)
+    const { call } = await calls.insertInbound(org, {
+      id: base.id,
+      lineId: base.lineId,
+      repMembershipId: null,
+      callerNumber: '+14155550123',
+      providerCallSid: `CA${crypto.randomUUID().replaceAll('-', '')}`,
+      createdAt: T0,
+    })
+    const reps = Array.from({ length: 8 }, () => formatId('mem', crypto.randomUUID()))
+    const results = await Promise.all(
+      reps.map((rep) => calls.claimInbound(org, call.id, rep, at(1)))
+    )
+    const winners = results.filter((result) => result !== undefined)
+    expect(winners).toHaveLength(1)
+    const stored = await calls.get(org, call.id)
+    expect(stored).toMatchObject({
+      state: 'connecting',
+      repMembershipId: winners[0]?.repMembershipId,
+    })
+    expect(
+      (await calls.events(org, call.id)).map((e) =>
+        e.kind === 'state_changed' ? e.toState : e.kind
+      )
+    ).toEqual(['ringing', 'connecting'])
+  })
+
+  test('a claim by another Rep of a Call assigned to one, or of a missed Call, loses', async () => {
+    const org = newOrganization()
+    const base = await callFor(org)
+    const mine = formatId('mem', crypto.randomUUID())
+    const { call } = await calls.insertInbound(org, {
+      id: base.id,
+      lineId: base.lineId,
+      repMembershipId: mine,
+      callerNumber: '+14155550123',
+      providerCallSid: `CA${crypto.randomUUID().replaceAll('-', '')}`,
+      createdAt: T0,
+    })
+    expect(
+      await calls.claimInbound(org, call.id, formatId('mem', crypto.randomUUID()), at(1))
+    ).toBe(undefined)
+    await calls.transition(org, call.id, { to: 'missed', at: at(2) })
+    expect(await calls.claimInbound(org, call.id, mine, at(3))).toBe(undefined)
+    expect(await calls.claimInbound(newOrganization(), call.id, mine, at(3))).toBe(undefined)
+  })
+  test('the missed sweep finds Organizations by the scan and misses only stale ringing Calls', async () => {
+    const org = newOrganization()
+    const other = newOrganization()
+    const make = async (organization: OrganizationId, createdAt: Date) => {
+      const base = await callFor(organization)
+      const { call } = await calls.insertInbound(organization, {
+        id: base.id,
+        lineId: base.lineId,
+        repMembershipId: null,
+        callerNumber: '+14155550123',
+        providerCallSid: `CA${crypto.randomUUID().replaceAll('-', '')}`,
+        createdAt,
+      })
+      return call
+    }
+    const stale = await make(org, T0)
+    const claimed = await make(org, T0)
+    const fresh = await make(org, at(100))
+    const foreign = await make(other, T0)
+    await calls.claimInbound(org, claimed.id, formatId('mem', crypto.randomUUID()), at(1))
+
+    const found: string[] = []
+    let after: string | null = null
+    for (;;) {
+      const page: string[] = await calls.organizationsWithStaleRinging(at(30), after, 500)
+      found.push(...page)
+      after = page[page.length - 1] ?? null
+      if (page.length < 500) {
+        break
+      }
+    }
+    expect(found).toContain(org)
+
+    const missed = await calls.missStaleRinging(org, at(30), at(31), 100)
+    expect(missed.map((call) => call.id)).toEqual([stale.id])
+    expect(await calls.missStaleRinging(org, at(30), at(32), 100)).toEqual([])
+    expect((await calls.get(org, stale.id))?.state).toBe('missed')
+    expect((await calls.get(org, claimed.id))?.state).toBe('connecting')
+    expect((await calls.get(org, fresh.id))?.state).toBe('ringing')
+    expect((await calls.get(other, foreign.id))?.state).toBe('ringing')
+    expect(
+      (await calls.events(org, stale.id)).map((e) =>
+        e.kind === 'state_changed' ? e.toState : e.kind
+      )
+    ).toEqual(['ringing', 'missed'])
+  })
 })
