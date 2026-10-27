@@ -71,6 +71,10 @@ const DEPLOYED_ENV: Readonly<Record<string, string>> = {
   TWILIO_AUTH_TOKEN: 'auth-token-0123456789abcdef',
   TWILIO_TWIML_APP_SID: `AP${'c'.repeat(32)}`,
   WEBHOOK_BASE_URL: 'https://voice.example',
+  STT_PRICE_MICRO_CENTS_PER_SECOND: '4000',
+  TTS_PRICE_MICRO_CENTS_PER_CHARACTER: '1500',
+  LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN: '30',
+  LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN: '150',
 }
 
 /** A verifier that accepts nothing, for a test that never sends a token. */
@@ -110,6 +114,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
   const logLines: string[] = []
   const reported: TestDeps['reported'] = []
 
+  const calls = createMemoryCallStore()
   return {
     env: loadEnv({
       ENVIRONMENT: 'local',
@@ -127,7 +132,10 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     lines: createMemoryLineStore(),
     agentSettings: createMemoryAgentSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
-    turns: createMemoryAgentTurnStore(),
+    turns: createMemoryAgentTurnStore(
+      () => new Date(),
+      (org, id, n) => calls.addAgentCost(org, id, n)
+    ),
     evidence: createMemoryEvidenceSearch(),
     llm: createMemoryLlm({ sleep: async () => undefined, random: () => 0 }),
     idempotency: createMemoryIdempotencyStore(),
@@ -135,7 +143,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: overrides.telephony ?? createMemoryTelephony(),
     callEvents: createMemoryCallEventStore(),
-    calls: createMemoryCallStore(),
+    calls,
     directory: createMemoryOrganizationDirectory(),
     close: async () => undefined,
     readinessChecks: overrides.readinessChecks ?? [],

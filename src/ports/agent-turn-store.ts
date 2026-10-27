@@ -57,10 +57,14 @@ export type AgentTurnStore = {
   /**
    * Stores the turn and its sources together. When a turn already exists at that index nothing is
    * written and the stored one is returned with `created: false`, whatever the new one says.
+   * With `costMicroCents` and a Call conversation, a turn that was stored adds that cost to the
+   * Call in the same step, so a restart can neither lose it nor count it twice; the Call's new
+   * total is `callCostMicroCents` (`null` when nothing was added).
    */
   append: (
     organizationId: string,
     conversation: ConversationRef,
-    turn: NewAgentTurn
-  ) => Promise<{ turn: StoredAgentTurn; created: boolean }>
+    turn: NewAgentTurn,
+    costMicroCents?: number
+  ) => Promise<{ turn: StoredAgentTurn; created: boolean; callCostMicroCents: number | null }>
 }

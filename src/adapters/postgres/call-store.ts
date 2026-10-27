@@ -55,8 +55,13 @@ function toStored(row: Row): StoredCall {
     // The Recording has no row of its own until the Recording ticket, so it reads as none.
     recordingState: 'none',
     transcriptState: row.transcriptState,
+    endReason: row.endReason,
   })
-  return { ...call, providerCallSid: row.providerCallSid }
+  return {
+    ...call,
+    providerCallSid: row.providerCallSid,
+    agentCostMicroCents: Number(row.agentCostMicroCents),
+  }
 }
 
 /**
@@ -202,6 +207,34 @@ export function createPostgresCallStore(db: Database): CallStore {
       })
     },
 
+    async claimForAgent(organizationId, id, at) {
+      return withOrganization(db, organizationId, async (tx) => {
+        // Same single conditional update as a Rep's claim, but only while no Rep holds the Call.
+        const [row] = await tx
+          .update(voiceCalls)
+          .set({ state: 'connecting', updatedAt: sql`now()` })
+          .where(
+            and(
+              one(organizationId, id),
+              eq(voiceCalls.direction, 'inbound'),
+              eq(voiceCalls.state, 'ringing'),
+              sql`${voiceCalls.repMembershipId} is null`
+            )
+          )
+          .returning()
+        if (row === undefined) {
+          return undefined
+        }
+        await log(tx, organizationId, id, {
+          kind: 'state_changed',
+          fromState: 'ringing',
+          toState: 'connecting',
+          occurredAt: at,
+        })
+        return toStored(row)
+      })
+    },
+
     async organizationsWithStaleRinging(before, after, limit) {
       const result = await db.execute<{ organization_id: string }>(
         sql`select organization_id from voice.orgs_with_stale_ringing(${before.toISOString()}::timestamptz, ${after}::text, ${limit}::int)`
@@ -304,7 +337,9 @@ export function createPostgresCallStore(db: Database): CallStore {
         if (
           !canTransition(current.state, move.to, current.disclosureWordingVersion) ||
           (move.to === 'failed') !== (move.failureReason !== undefined) ||
-          (move.failureReason === 'disclosure_failed' && played)
+          (move.failureReason === 'disclosure_failed' && played) ||
+          (move.endReason !== undefined && move.to !== 'ended') ||
+          (move.to === 'live' && move.agent === true && !current.aiAssisted)
         ) {
           throw new InvalidTransitionError(current.state, move.to)
         }
@@ -318,6 +353,7 @@ export function createPostgresCallStore(db: Database): CallStore {
             endedAt: final ? move.at : null,
             endedBy: final ? (move.endedBy ?? null) : null,
             failureReason: move.failureReason ?? null,
+            endReason: move.endReason ?? null,
             durationSeconds:
               move.to === 'ended' && answeredAt !== null
                 ? Math.max(0, Math.floor((move.at.getTime() - answeredAt.getTime()) / 1000))

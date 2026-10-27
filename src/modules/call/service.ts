@@ -54,6 +54,17 @@ export const DISCLOSURE_WORDING = {
   text: 'Hello. This call is being recorded for quality and training purposes. By staying on the line you agree to the recording.',
 } as const
 
+/**
+ * The Disclosure played first on every Call the Agent answers, in force from version 2. It says an
+ * AI is speaking and that the Call is recorded. The Call can reach `live` only after this wording
+ * (or any wording with `aiAssisted`) has played, and no setting skips or replaces it (ADR 0003).
+ */
+export const AGENT_DISCLOSURE_WORDING = {
+  version: 2,
+  aiAssisted: true,
+  text: 'Hello. You are speaking with an AI assistant, and this call is being recorded for quality and training purposes. By staying on the line you agree to the recording.',
+} as const
+
 const E164 = /^\+[1-9][0-9]{6,14}$/
 
 /** The most Calls a page of the list may hold, one more than the page is read to find the next. */
@@ -84,12 +95,12 @@ function requireVoiceRole(caller: Caller): void {
 
 /** Drops what is internal to the service (the provider's id) before a Call leaves it. */
 function toCall(stored: StoredCall): VoiceCall {
-  const { providerCallSid: _providerCallSid, ...call } = stored
+  const { providerCallSid: _providerCallSid, agentCostMicroCents: _cost, ...call } = stored
   return call
 }
 
 /** Runs one provider call under the deadline; a call that outlives it is `telephony.unavailable`. */
-async function withinDeadline<T>(
+export async function withinDeadline<T>(
   deps: CallDeps,
   call: (options: { timeoutMs: number }) => Promise<T>
 ): Promise<T> {
@@ -355,7 +366,7 @@ export async function place(
     deps,
     caller,
     membershipId,
-    { ...answer.body.call, providerCallSid: null },
+    { ...answer.body.call, providerCallSid: null, agentCostMicroCents: 0 },
     line.number,
     to
   )

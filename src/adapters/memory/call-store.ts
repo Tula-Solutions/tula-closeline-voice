@@ -12,6 +12,11 @@ import {
 export type MemoryCallStore = CallStore & {
   /** The ids of every Call of the Organization, in creation order. */
   idsOf: (organizationId: string) => string[]
+  /**
+   * Adds to the Agent's cost on a Call and returns the new total, `undefined` for no such Call.
+   * For the memory turn store only: the port deliberately has no way to add cost apart from a turn.
+   */
+  addAgentCost: (organizationId: string, id: string, microCents: number) => number | undefined
 }
 
 type Row = { call: StoredCall; log: CallLogEntry[]; key: string | undefined }
@@ -39,6 +44,15 @@ export function createMemoryCallStore(): MemoryCallStore {
 
   return {
     idsOf: (organizationId) => [...rowsOf(organizationId).keys()],
+
+    addAgentCost(organizationId, id, microCents) {
+      const row = rowsOf(organizationId).get(id)
+      if (row === undefined) {
+        return undefined
+      }
+      row.call.agentCostMicroCents += microCents
+      return row.call.agentCostMicroCents
+    },
 
     async insert(organizationId, input) {
       const rows = rowsOf(organizationId)
@@ -69,6 +83,8 @@ export function createMemoryCallStore(): MemoryCallStore {
         recordingState: 'none',
         transcriptState: 'pending',
         providerCallSid: null,
+        endReason: null,
+        agentCostMicroCents: 0,
       }
       rows.set(call.id, {
         call,
@@ -106,6 +122,8 @@ export function createMemoryCallStore(): MemoryCallStore {
         recordingState: 'none',
         transcriptState: 'pending',
         providerCallSid: input.providerCallSid,
+        endReason: null,
+        agentCostMicroCents: 0,
       }
       rows.set(call.id, {
         call,
@@ -128,6 +146,21 @@ export function createMemoryCallStore(): MemoryCallStore {
       }
       row.call.state = 'connecting'
       row.call.repMembershipId = repMembershipId as VoiceCall['repMembershipId']
+      row.log.push({ kind: 'state_changed', fromState: 'ringing', toState: 'connecting', at })
+      return copy(row.call)
+    },
+
+    async claimForAgent(organizationId, id, at) {
+      const row = rowsOf(organizationId).get(id)
+      if (
+        row === undefined ||
+        row.call.direction !== 'inbound' ||
+        row.call.state !== 'ringing' ||
+        row.call.repMembershipId !== null
+      ) {
+        return undefined
+      }
+      row.call.state = 'connecting'
       row.log.push({ kind: 'state_changed', fromState: 'ringing', toState: 'connecting', at })
       return copy(row.call)
     },
@@ -211,7 +244,9 @@ export function createMemoryCallStore(): MemoryCallStore {
       if (
         !canTransition(call.state, move.to, call.disclosure.wordingVersion) ||
         (move.to === 'failed') !== (move.failureReason !== undefined) ||
-        (move.failureReason === 'disclosure_failed' && call.disclosure.playedAt !== null)
+        (move.failureReason === 'disclosure_failed' && call.disclosure.playedAt !== null) ||
+        (move.endReason !== undefined && move.to !== 'ended') ||
+        (move.to === 'live' && move.agent === true && !call.disclosure.aiAssisted)
       ) {
         throw new InvalidTransitionError(call.state, move.to)
       }
@@ -230,6 +265,9 @@ export function createMemoryCallStore(): MemoryCallStore {
           0,
           Math.floor((move.at.getTime() - Date.parse(call.answeredAt)) / 1000)
         )
+      }
+      if (move.endReason !== undefined) {
+        call.endReason = move.endReason
       }
       if (move.failureReason !== undefined) {
         call.failureReason = move.failureReason

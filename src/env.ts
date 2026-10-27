@@ -16,6 +16,17 @@ const LOCAL_DEFAULTS = {
   TELEPHONY_PROVIDER: 'memory',
 } as const
 
+/** The vendor prices a `local` run falls back to, in micro-cents (one millionth of a cent). */
+const LOCAL_PRICES = {
+  STT_PRICE_MICRO_CENTS_PER_SECOND: 4_000,
+  TTS_PRICE_MICRO_CENTS_PER_CHARACTER: 1_500,
+  LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN: 30,
+  LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN: 150,
+} as const
+
+/** The price keys: each a non-negative whole number of micro-cents per unit. */
+const PRICE_KEYS = Object.keys(LOCAL_PRICES) as (keyof typeof LOCAL_PRICES)[]
+
 /** The internal secret a local run accepts when none is set (ADR 0013); refused everywhere else. */
 export const LOCAL_INTERNAL_API_TOKEN = 'local-voice-internal-secret-not-for-deploys'
 
@@ -43,6 +54,7 @@ const REQUIRED_OUTSIDE_LOCAL = [
   'PLAYBOOK_INTERNAL_URL',
   'PLAYBOOK_INTERNAL_TOKEN',
   'INTERNAL_API_TOKENS',
+  ...PRICE_KEYS,
 ] as const
 
 /** The Twilio keys a `twilio` provider cannot run without. */
@@ -54,6 +66,9 @@ const TWILIO_REQUIRED = [
   'TWILIO_TWIML_APP_SID',
   'WEBHOOK_BASE_URL',
 ] as const
+
+/** A price per unit: a non-negative whole number of micro-cents, bounded to catch a unit mistake. */
+const priceSchema = z.coerce.number().int().min(0).max(1_000_000_000)
 
 const schema = z
   .object({
@@ -170,6 +185,14 @@ const schema = z
     MISSED_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1_000).max(600_000).default(5_000),
     /** The most Organizations one missed-Call sweep visits; the next run takes the rest. */
     MISSED_SWEEP_MAX_ORGANIZATIONS: z.coerce.number().int().min(1).max(10_000).default(200),
+    /** Vendor price of speech-to-text per second of audio, in micro-cents. Required outside `local`. */
+    STT_PRICE_MICRO_CENTS_PER_SECOND: priceSchema.optional(),
+    /** Vendor price of text-to-speech per character spoken, in micro-cents. Required outside `local`. */
+    TTS_PRICE_MICRO_CENTS_PER_CHARACTER: priceSchema.optional(),
+    /** Vendor price of one model input token, in micro-cents. Required outside `local`. */
+    LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN: priceSchema.optional(),
+    /** Vendor price of one model output token, in micro-cents. Required outside `local`. */
+    LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN: priceSchema.optional(),
     /** How long an inbound Call rings the Reps before it is recorded `missed`, in ms. */
     RING_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   })
@@ -345,6 +368,22 @@ const schema = z
       TELEPHONY_PROVIDER: need<'memory' | 'twilio'>(
         env.TELEPHONY_PROVIDER,
         LOCAL_DEFAULTS.TELEPHONY_PROVIDER
+      ),
+      STT_PRICE_MICRO_CENTS_PER_SECOND: need(
+        env.STT_PRICE_MICRO_CENTS_PER_SECOND,
+        LOCAL_PRICES.STT_PRICE_MICRO_CENTS_PER_SECOND
+      ),
+      TTS_PRICE_MICRO_CENTS_PER_CHARACTER: need(
+        env.TTS_PRICE_MICRO_CENTS_PER_CHARACTER,
+        LOCAL_PRICES.TTS_PRICE_MICRO_CENTS_PER_CHARACTER
+      ),
+      LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN: need(
+        env.LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN,
+        LOCAL_PRICES.LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN
+      ),
+      LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN: need(
+        env.LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN,
+        LOCAL_PRICES.LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN
       ),
       INTERNAL_API_TOKENS: (env.INTERNAL_API_TOKENS?.split(',') ??
         (local ? [LOCAL_INTERNAL_API_TOKEN] : [])) as readonly string[],

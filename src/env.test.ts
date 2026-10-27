@@ -24,6 +24,10 @@ test('configuration falls back to defaults for everything but the environment', 
     MISSED_SWEEP_INTERVAL_MS: 5_000,
     MISSED_SWEEP_MAX_ORGANIZATIONS: 200,
     RING_TIMEOUT_MS: 30_000,
+    STT_PRICE_MICRO_CENTS_PER_SECOND: 4_000,
+    TTS_PRICE_MICRO_CENTS_PER_CHARACTER: 1_500,
+    LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN: 30,
+    LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN: 150,
   })
 })
 
@@ -57,6 +61,10 @@ const DEPLOYED = {
   TWILIO_AUTH_TOKEN: 'auth-token-0123456789abcdef',
   TWILIO_TWIML_APP_SID: `AP${'c'.repeat(32)}`,
   WEBHOOK_BASE_URL: 'https://voice.example',
+  STT_PRICE_MICRO_CENTS_PER_SECOND: '4000',
+  TTS_PRICE_MICRO_CENTS_PER_CHARACTER: '1500',
+  LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN: '30',
+  LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN: '150',
 }
 
 test('a deployed environment accepts the full set of keys', () => {
@@ -204,4 +212,19 @@ test('internal secrets are bounded and the public local default is refused outsi
 
 test('a deployed environment without internal secrets fails at boot', () => {
   expect(() => loadEnv({ ENVIRONMENT: 'dev' })).toThrow(/INTERNAL_API_TOKENS is required/)
+})
+
+test('vendor prices are required outside local and must be non-negative whole numbers', () => {
+  const { STT_PRICE_MICRO_CENTS_PER_SECOND: _omitted, ...without } = DEPLOYED
+  expect(() => loadEnv({ ENVIRONMENT: 'prod', ...without })).toThrow()
+  expect(() => loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED })).not.toThrow()
+  for (const bad of ['-1', '1.5', 'free']) {
+    expect(() =>
+      loadEnv({ ENVIRONMENT: 'local', TTS_PRICE_MICRO_CENTS_PER_CHARACTER: bad })
+    ).toThrow()
+  }
+  expect(
+    loadEnv({ ENVIRONMENT: 'local', LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN: '0' })
+      .LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN
+  ).toBe(0)
 })
