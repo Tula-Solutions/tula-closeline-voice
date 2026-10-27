@@ -1,6 +1,7 @@
 import { ERRORS } from 'tula-closeline-contract'
 import type { TelephonyPort } from 'tula-closeline-kit'
 import { AppError } from 'tula-closeline-kit'
+import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 
@@ -49,4 +50,9 @@ export function createUnconfiguredTelephony(): TelephonyPort {
     verifyWebhook: () => false,
     mintBrowserToken: refuse,
   }
+}
+
+/** Evidence search for a deployment with no Playbook link for the Agent: every search fails closed. */
+export function createUnconfiguredEvidenceSearch(): EvidenceSearch {
+  return { search: async () => Promise.reject(unavailable()) }
 }

@@ -11,17 +11,24 @@ import {
   type TokenVerifier,
 } from 'tula-closeline-kit'
 import {
+  createMemoryLlm,
   createMemoryTelephony,
   createTestJwks,
   createTestKeyPair,
+  type MemoryLlm,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
 import { createMemoryAgentSettingsStore } from '~/adapters/memory/agent-settings-store'
+import { createMemoryAgentTurnStore } from '~/adapters/memory/agent-turn-store'
 import {
   createMemoryCallEventStore,
   type MemoryCallEventStore,
 } from '~/adapters/memory/call-event-store'
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
+import {
+  createMemoryEvidenceSearch,
+  type MemoryEvidenceSearch,
+} from '~/adapters/memory/evidence-search'
 import {
   createMemoryIdempotencyStore,
   type MemoryIdempotencyStore,
@@ -73,6 +80,8 @@ const REJECTING_VERIFIER: TokenVerifier = {
 /** The container plus the observable side effects a test asserts on. */
 export type TestDeps = Container & {
   clock: FixedClock
+  llm: MemoryLlm
+  evidence: MemoryEvidenceSearch
   idempotency: MemoryIdempotencyStore
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
@@ -115,6 +124,9 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     lines: createMemoryLineStore(),
     agentSettings: createMemoryAgentSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
+    turns: createMemoryAgentTurnStore(),
+    evidence: createMemoryEvidenceSearch(),
+    llm: createMemoryLlm({ sleep: async () => undefined, random: () => 0 }),
     idempotency: createMemoryIdempotencyStore(),
     numbers: createMemoryNumberProvisioner(),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
