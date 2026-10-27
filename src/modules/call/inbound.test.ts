@@ -282,6 +282,19 @@ describe('an inbound Call to a Team Line', () => {
 })
 
 describe('Organization isolation', () => {
+  it("never rings Organization A's Reps for Organization B's Team Line", async () => {
+    const orgB = newOrganizationId()
+    const team = formatId('team', crypto.randomUUID())
+    const repA = partyIn(organizationId)
+    t.deps.directory.addTeam(orgB, team)
+    t.deps.directory.setOnlineReps(organizationId, team, [repA.membership])
+    const number = await lineWith(orgB, { kind: 'team', teamId: team })
+    await ring(number)
+    const [call] = await callsOf(orgB)
+    expect(call?.state).toBe('missed')
+    expect(await listed(repA.identity)).toHaveLength(0)
+  })
+
   it('never rings or lets answer a Rep of another Organization', async () => {
     const orgB = newOrganizationId()
     const repA = partyIn(organizationId)

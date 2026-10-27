@@ -4,6 +4,7 @@ import {
   internalDirectoryRepCheckResponseSchema,
   internalDirectoryTeamCheckResponseSchema,
   internalDirectoryTeamRepsResponseSchema,
+  internalDirectoryTeamRingMembersResponseSchema,
 } from 'tula-closeline-contract'
 import { AppError } from 'tula-closeline-kit'
 import type { z } from 'zod'
@@ -126,8 +127,15 @@ export function createCoreHttpOrganizationDirectory(
           internalDirectoryTeamRepsResponseSchema
         )
       ).membershipIds,
-    // Core has no presence route yet, so a Team Line cannot ring: fail closed until it does.
-    onlineRepsOfTeam: async () => Promise.reject(unavailable()),
+    // shortcut: returns the Team's Reps unfiltered (voice has no presence source), add presence filtering here once it does.
+    onlineRepsOfTeam: async (organizationId, teamId) =>
+      (
+        await call(
+          '/internal/v1/directory/team-ring-members',
+          { organizationId, teamId },
+          internalDirectoryTeamRingMembersResponseSchema
+        )
+      ).membershipIds,
     isRep: async (organizationId, membershipId) =>
       (
         await call(
