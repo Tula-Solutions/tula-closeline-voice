@@ -5,6 +5,7 @@ import { createBaseApp } from '~/http/base'
 import { createRouter } from '~/http/router'
 import { registerSecuritySchemes } from '~/http/security'
 import type { AppEnv } from '~/http/types'
+import { createAgentSettingsRouter } from '~/modules/agent-settings/router'
 import { createCallRouter } from '~/modules/call/router'
 import { createHealthRouter } from '~/modules/health/router'
 import { createLineRouter } from '~/modules/line/router'
@@ -25,6 +26,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   const publicRoutes = createRouter<AuthedEnv>()
   publicRoutes.use('*', authenticate(container))
   publicRoutes.route('/', createLineRouter(container))
+  publicRoutes.route('/', createAgentSettingsRouter(container))
   publicRoutes.route('/', createSoftphoneRouter(container))
   publicRoutes.route('/', createCallRouter(container))
   app.route('/v1', publicRoutes)

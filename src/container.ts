@@ -17,10 +17,12 @@ import { createMemoryTelephony } from 'tula-closeline-kit/testing'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
+import { createPostgresAgentSettingsStore } from '~/adapters/postgres/agent-settings-store'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
+import { createPostgresQualificationQuestionStore } from '~/adapters/postgres/qualification-question-store'
 import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
 import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import {
@@ -30,12 +32,14 @@ import {
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import type { AgentSettingsStore } from '~/ports/agent-settings-store'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
+import type { QualificationQuestionStore } from '~/ports/qualification-question-store'
 import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
@@ -65,6 +69,10 @@ export type Container = {
   tokenVerifier: TokenVerifier
   /** The Lines of every Organization; the only way a module reaches the `voice` schema. */
   lines: LineStore
+  /** The Inbound Agent settings of every Organization, one row each. */
+  agentSettings: AgentSettingsStore
+  /** The Qualification questions of every Organization, in the order the Agent asks them. */
+  questions: QualificationQuestionStore
   /** The stored answers of requests sent with an `Idempotency-Key`, per Organization and user. */
   idempotency: IdempotencyStore
   /** Buys, ports and releases numbers at the telephony provider. */
@@ -195,6 +203,8 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
       clock: systemClock,
     }),
     lines: createPostgresLineStore(database.db),
+    agentSettings: createPostgresAgentSettingsStore(database.db),
+    questions: createPostgresQualificationQuestionStore(database.db),
     idempotency: createPostgresIdempotencyStore(database.db),
     // The in-memory provisioner is local-only (the env schema rejects it elsewhere); a deployment
     // on `twilio` has no number adapter yet, so buying, porting and releasing fail closed.

@@ -44,6 +44,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   Add, assign and release are Owner and Admin; list and read are every role. Every tenant query
   goes through `withOrganization` (`src/adapters/postgres/line-store.ts`). `providerSid` never
   leaves the service.
+- `src/modules/agent-settings/` is the Inbound Agent settings and Qualification questions (`GET/PUT /v1/agent/settings`, `GET/POST /v1/agent/questions`, `GET/PATCH/DELETE /v1/agent/questions/{id}`, `PUT /v1/agent/question-order`). Reads need Owner, Admin or Manager; writes need Owner or Admin. No row means the defaults, with the Agent paused. `Agent.isPaused` / `assertNotPaused` (`agent.paused`) are for the conversation engine to call before answering or calling back. Questions are one ordered list per Organization (max 50, positions 1..n); every change goes through the store's `change`, which locks per Organization, and skip logic may only name an earlier question. No setting touches the Disclosure, the recording notice or the consent gate (ADR 0003).
 - `src/modules/call/` places and lists Calls (`POST/GET /v1/calls`, `GET /v1/calls/{id}`,
   `PUT /v1/calls/{id}/wrap-up`). `state.ts` holds the one edge table (`canTransition`): `live` is
   unreachable without a stored Disclosure version, and the stores enforce it. Placing needs an
