@@ -29,6 +29,8 @@ const REQUIRED_OUTSIDE_LOCAL = [
   'TELEPHONY_PROVIDER',
   'CORE_INTERNAL_URL',
   'CORE_INTERNAL_TOKEN',
+  'PLAYBOOK_INTERNAL_URL',
+  'PLAYBOOK_INTERNAL_TOKEN',
 ] as const
 
 /** The Twilio keys a `twilio` provider cannot run without. */
@@ -115,6 +117,16 @@ const schema = z
      * Required with `CORE_INTERNAL_URL`.
      */
     CORE_INTERNAL_TOKEN: z.string().min(16).max(512).optional(),
+    /**
+     * The Playbook's origin for the internal Document search the Agent answers from. https outside
+     * `local`. Required outside `local`; when `local` and unset, an empty in-memory search is used.
+     */
+    PLAYBOOK_INTERNAL_URL: z.url().max(2_048).optional(),
+    /**
+     * The internal bearer secret the Playbook accepts (ADR 0013). A credential: never log it.
+     * Required with `PLAYBOOK_INTERNAL_URL`.
+     */
+    PLAYBOOK_INTERNAL_TOKEN: z.string().min(16).max(512).optional(),
     /** The Twilio region of the account's API keys; omit for the US default. */
     TWILIO_REGION: z.enum(TWILIO_REGIONS).optional(),
     /**
@@ -172,6 +184,30 @@ const schema = z
           code: 'custom',
           path: ['CORE_INTERNAL_URL'],
           message: 'CORE_INTERNAL_URL must be https (http only when ENVIRONMENT is local)',
+        })
+      }
+    }
+    if ((env.PLAYBOOK_INTERNAL_URL === undefined) !== (env.PLAYBOOK_INTERNAL_TOKEN === undefined)) {
+      const missing =
+        env.PLAYBOOK_INTERNAL_URL === undefined
+          ? 'PLAYBOOK_INTERNAL_URL'
+          : 'PLAYBOOK_INTERNAL_TOKEN'
+      context.addIssue({
+        code: 'custom',
+        path: [missing],
+        message: 'PLAYBOOK_INTERNAL_URL and PLAYBOOK_INTERNAL_TOKEN are set together',
+      })
+    }
+    if (env.PLAYBOOK_INTERNAL_URL !== undefined) {
+      const playbook = new URL(env.PLAYBOOK_INTERNAL_URL)
+      if (
+        playbook.protocol !== 'https:' &&
+        !(env.ENVIRONMENT === 'local' && playbook.protocol === 'http:')
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['PLAYBOOK_INTERNAL_URL'],
+          message: 'PLAYBOOK_INTERNAL_URL must be https (http only when ENVIRONMENT is local)',
         })
       }
     }

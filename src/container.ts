@@ -20,6 +20,7 @@ import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organi
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
+import { createPlaybookHttpEvidenceSearch } from '~/adapters/playbook-http/evidence-search'
 import { createPostgresAgentSettingsStore } from '~/adapters/postgres/agent-settings-store'
 import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-store'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
@@ -188,6 +189,20 @@ function createDirectory(env: Env): OrganizationDirectory {
     : createUnconfiguredOrganizationDirectory()
 }
 
+/** Picks evidence search: the Playbook over HTTP when configured, in memory only for an unconfigured local run. */
+function createEvidenceSearch(env: Env): EvidenceSearch {
+  if (env.PLAYBOOK_INTERNAL_URL && env.PLAYBOOK_INTERNAL_TOKEN) {
+    return createPlaybookHttpEvidenceSearch({
+      baseUrl: env.PLAYBOOK_INTERNAL_URL,
+      token: env.PLAYBOOK_INTERNAL_TOKEN,
+    })
+  }
+  // The env schema requires both keys outside `local`, so only a local run gets here.
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryEvidenceSearch()
+    : createUnconfiguredEvidenceSearch()
+}
+
 /** Options for {@link createContainer}. */
 export type ContainerOptions = {
   /** Where log lines go; defaults to stdout. */
@@ -224,12 +239,9 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     agentSettings: createPostgresAgentSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
-    // The Playbook has no route the Agent can call with a service credential yet, so a deployed
-    // run answers nothing from Documents. Only a local run gets the (empty) in-memory search.
-    evidence:
-      env.ENVIRONMENT === 'local'
-        ? createMemoryEvidenceSearch()
-        : createUnconfiguredEvidenceSearch(),
+    // The Playbook's internal search route; only a local run without PLAYBOOK_INTERNAL_* gets the
+    // (empty) in-memory search.
+    evidence: createEvidenceSearch(env),
     llm: createLlm(env, logger),
     idempotency: createPostgresIdempotencyStore(database.db),
     // The in-memory provisioner is local-only (the env schema rejects it elsewhere); a deployment

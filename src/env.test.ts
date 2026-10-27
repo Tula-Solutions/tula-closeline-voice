@@ -43,6 +43,8 @@ const DEPLOYED = {
   STORAGE_BUCKET: 'closeline-voice-recordings',
   CORE_INTERNAL_URL: 'https://core.internal',
   CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
+  PLAYBOOK_INTERNAL_URL: 'https://playbook.internal',
+  PLAYBOOK_INTERNAL_TOKEN: 'playbook-internal-token-0123456789',
   TELEPHONY_PROVIDER: 'twilio',
   TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
   TWILIO_API_KEY_SID: `SK${'b'.repeat(32)}`,
@@ -73,6 +75,8 @@ test('the core link is optional when local but must be set together and be https
       ENVIRONMENT: 'local',
       CORE_INTERNAL_URL: 'http://127.0.0.1:3002',
       CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
+      PLAYBOOK_INTERNAL_URL: 'https://playbook.internal',
+      PLAYBOOK_INTERNAL_TOKEN: 'playbook-internal-token-0123456789',
     }).CORE_INTERNAL_URL
   ).toBe('http://127.0.0.1:3002')
   expect(() =>
@@ -87,6 +91,16 @@ test('the core link is optional when local but must be set together and be https
   expect(() => loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, CORE_INTERNAL_TOKEN: 'short' })).toThrow(
     'CORE_INTERNAL_TOKEN'
   )
+})
+
+test('the playbook link is optional when local but must be set together and be https elsewhere', () => {
+  expect(loadEnv({ ENVIRONMENT: 'local' }).PLAYBOOK_INTERNAL_URL).toBeUndefined()
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'local', PLAYBOOK_INTERNAL_URL: 'http://127.0.0.1:3003' })
+  ).toThrow('PLAYBOOK_INTERNAL_TOKEN')
+  expect(() =>
+    loadEnv({ ENVIRONMENT: 'prod', ...DEPLOYED, PLAYBOOK_INTERNAL_URL: 'http://playbook.internal' })
+  ).toThrow('PLAYBOOK_INTERNAL_URL must be https')
 })
 
 test('the in-memory telephony provider is accepted only when local', () => {
