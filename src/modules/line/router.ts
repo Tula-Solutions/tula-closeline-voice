@@ -12,7 +12,7 @@ import { type AuthedEnv, callerOf } from '~/http/auth'
 import {
   errorResponse,
   errorResponseWithRetryAfter,
-  optionalIdempotencyKeyHeader,
+  requiredIdempotencyKeyHeader,
 } from '~/http/responses'
 import { createRouter } from '~/http/router'
 import { PUBLIC_SECURITY } from '~/http/security'
@@ -52,17 +52,17 @@ const add = createRoute({
   tags: ['lines'],
   summary: 'Add a Line by buying or porting a number',
   description:
-    'Owner and Admin only. A port is `porting` until the carrier completes it. Send an ' +
-    '`Idempotency-Key` to make a retry safe: the same key with the same request answers 200 with ' +
+    'Owner and Admin only. A port is `porting` until the carrier completes it. Needs an ' +
+    '`Idempotency-Key`, so a retry is safe: the same key with the same request answers 200 with ' +
     'the first Line and buys or ports nothing again, for 24 hours.',
   security,
   request: {
-    headers: optionalIdempotencyKeyHeader(
+    headers: requiredIdempotencyKeyHeader(
       'A client-chosen key. The same key with the same request returns the first Line and does ' +
         'nothing again, for 24 hours; the same key with another request is ' +
         'request.idempotency_key_reused (422); the same key while the first request is still ' +
-        'running is request.idempotency_in_progress (409, with Retry-After). Without it the call ' +
-        'is not protected against being repeated.'
+        'running is request.idempotency_in_progress (409, with Retry-After). Required: without ' +
+        'it the request is refused as request.invalid (400), so a retry can never buy twice.'
     ),
     body: { required: true, content: { 'application/json': { schema: addLineRequestSchema } } },
   },

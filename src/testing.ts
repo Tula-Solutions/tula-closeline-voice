@@ -196,10 +196,14 @@ export async function createTestApp(overrides: TestDepsOverrides = {}): Promise<
     deps,
     bearer,
     call: async (identity, method, path, body) => {
+      // Buying a Line needs an Idempotency-Key; a fresh one keeps each call a new purchase.
+      const key: Record<string, string> =
+        method === 'POST' && path === '/lines' ? { 'idempotency-key': crypto.randomUUID() } : {}
       const response = await app.request(`/v1${path}`, {
         method,
         headers: {
           ...(await bearer(identity)),
+          ...key,
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

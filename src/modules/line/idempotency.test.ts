@@ -55,6 +55,15 @@ const linesOf = async (who: TestIdentity) =>
   ((await t.call(who, 'GET', '/lines')).body as { items: LineBody[] }).items
 
 describe('adding a Line with an Idempotency-Key', () => {
+  it('refuses a request without the key as request.invalid and buys nothing', async () => {
+    const provisioning = countProvisioning()
+    const refused = await post(admin, buyBody)
+    expect(refused.status).toBe(400)
+    expect((refused.body as ErrorBody).error.code).toBe('request.invalid')
+    expect(provisioning.calls()).toBe(0)
+    expect(await linesOf(admin)).toHaveLength(0)
+  })
+
   it('answers a repeat with the stored Line and buys nothing again', async () => {
     const provisioning = countProvisioning()
     const first = await post(admin, buyBody, { 'idempotency-key': KEY })
@@ -166,14 +175,6 @@ describe('adding a Line with an Idempotency-Key', () => {
     await post(admin, buyBody, { 'idempotency-key': KEY })
     const other = await post(admin, port, { 'idempotency-key': KEY })
     expect(other.status).toBe(422)
-  })
-
-  it('without a key every request buys a number', async () => {
-    const provisioning = countProvisioning()
-    await post(admin, buyBody)
-    await post(admin, buyBody)
-    expect(provisioning.calls()).toBe(2)
-    expect(t.deps.idempotency.count(admin.organizationId)).toBe(0)
   })
 
   it('refuses a malformed key as request.invalid before anything is bought', async () => {
