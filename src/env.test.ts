@@ -21,6 +21,7 @@ test('configuration falls back to defaults for everything but the environment', 
     TWILIO_PURGE_INTERVAL_MS: 900_000,
     TWILIO_PURGE_MAX_ORGANIZATIONS: 200,
     TWILIO_PURGE_QUERY_TIMEOUT_MS: 10_000,
+    RING_TIMEOUT_MS: 30_000,
   })
 })
 

@@ -126,6 +126,8 @@ export function createCoreHttpOrganizationDirectory(
           internalDirectoryTeamRepsResponseSchema
         )
       ).membershipIds,
+    // Core has no presence route yet, so a Team Line cannot ring: fail closed until it does.
+    onlineRepsOfTeam: async () => Promise.reject(unavailable()),
     isRep: async (organizationId, membershipId) =>
       (
         await call(

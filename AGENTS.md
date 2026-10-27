@@ -69,6 +69,13 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 - `src/modules/webhook/` receives Twilio status and recording callbacks (unauthenticated, verified by
   `X-Twilio-Signature` over `WEBHOOK_BASE_URL` + path; bad signature is 403 and changes nothing;
   `CallEventStore` appends one `provider_callback` row per event id, duplicates change nothing).
+  `POST /webhooks/twilio/inbound` starts an inbound Call: `lines.byNumber(To)`, then `Calls.ringInbound`
+  inserts it `ringing` once per provider call id (a retry is `duplicate`), rings the assigned Rep or the
+  Team's online Reps (`directory.onlineRepsOfTeam`, core has no route yet so it fails closed), and arms
+  `after(RING_TIMEOUT_MS)` to record `missed`. `POST /v1/calls/{id}/answer` is decided by one conditional
+  update in `CallStore.claimInbound` (`ringing` to `connecting`); the loser gets `call.not_ringing` (a
+  local code, not yet in the contract). The ring timer is in process and lost on restart. Missed Calls on
+  a Team Line have no Rep, so only Owner and Admin list them.
   `src/modules/softphone/` mints the short-lived browser token (`POST /v1/softphone/token`, Rep and
   Organization only; `OrganizationDirectory.membershipOf`). `telephony` is built in `container.ts`:
   the kit Twilio adapter over the Postgres `TwilioStore` (`src/adapters/postgres/twilio-store.ts`; rows carry `expires_at`; `purgeExpiredTwilio` in `twilio-purge.ts` removes one Organization's expired rows in bounded batches). With `TELEPHONY_PROVIDER=twilio`, `server.ts` starts the scheduled purge (`src/modules/purge/`: `schedule.ts` runs a jittered, non-overlapping timer; `twilio-purge-job.ts` pages `voice.twilio_orgs_with_expired` through the `TwilioPurgeSource` port, caps each run, and resumes from an in-memory cursor so failing Organizations cannot starve the rest). Each purge-source query is bounded by `TWILIO_PURGE_QUERY_TIMEOUT_MS` twice over: Postgres `statement_timeout` set locally in the transaction, a purge starts no new batch after one timeout (it reports undrained), and `bound-source.ts` rejects a scan after the timeout and a purge after twice it with `PurgeQueryTimeoutError`, so a hung source cannot hold the run. A timeout is reported like any failure and the next tick runs normally; shutdown waits for at most one in-flight query.
@@ -88,7 +95,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 in its `INTERNAL_API_TOKENS`; set together; required outside local, where unset means an empty
 in-memory directory),
 and the purge schedule keys `TWILIO_PURGE_INTERVAL_MS` (default 900000) and
-`TWILIO_PURGE_MAX_ORGANIZATIONS` (default 200), `TWILIO_PURGE_QUERY_TIMEOUT_MS` (default 10000). The deployment keys have
+`TWILIO_PURGE_MAX_ORGANIZATIONS` (default 200), `TWILIO_PURGE_QUERY_TIMEOUT_MS` (default 10000), `RING_TIMEOUT_MS` (default 30000). The deployment keys have
 local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_ENDPOINT` and
 `STORAGE_ENDPOINT` are local-only. Add a key in both files.
 

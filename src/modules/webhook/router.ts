@@ -40,23 +40,47 @@ const describeRoute = (path: string, summary: string) =>
 const status = describeRoute('/webhooks/twilio/status', 'Receive a call status callback')
 const recording = describeRoute('/webhooks/twilio/recording', 'Receive a recording status callback')
 
+const inbound = createRoute({
+  method: 'post',
+  path: '/webhooks/twilio/inbound',
+  tags: ['webhooks'],
+  summary: 'Receive an inbound call',
+  description:
+    'Called by the telephony provider when a Prospect calls one of our numbers; it carries no ' +
+    "access token. The signature is checked first. The Line's Reps ring once however often the " +
+    'provider retries, and the answer is TwiML that holds the call open while they do.',
+  responses: {
+    200: {
+      description: 'TwiML that holds the call.',
+      content: { 'text/xml': { schema: z.string() } },
+    },
+    400: errorResponse('request.invalid'),
+    403: errorResponse('auth.forbidden: the signature is missing or does not match.'),
+    413: errorResponse('request.too_large'),
+    500: errorResponse('Something went wrong on our side.'),
+  },
+})
+
 /** Reads the raw callback off the request and hands it to the service. */
-async function receiveFrom(
-  container: Container,
-  kind: Webhooks.CallbackKind,
-  c: Context
-): Promise<{ outcome: Webhooks.CallbackOutcome }> {
+async function rawCallback(c: Context): Promise<Webhooks.RawCallback> {
   // The length the sender declares is checked before the body is read at all.
   if (Number(c.req.header('content-length') ?? 0) > MAX_WEBHOOK_BODY_BYTES) {
     throw domainError(ERRORS['request.too_large'])
   }
   const url = new URL(c.req.url)
-  const outcome = await Webhooks.receive(container, kind, {
+  return {
     pathAndQuery: `${url.pathname}${url.search}`,
     body: await c.req.text(),
     signature: c.req.header('x-twilio-signature'),
-  })
-  return { outcome }
+  }
+}
+
+async function receiveFrom(
+  container: Container,
+  kind: Webhooks.CallbackKind,
+  c: Context
+): Promise<{ outcome: Webhooks.CallbackOutcome }> {
+  return { outcome: await Webhooks.receive(container, kind, await rawCallback(c)) }
 }
 
 /** The provider's webhooks. Mounted outside the access-token middleware: the signature is the proof. */
@@ -64,5 +88,17 @@ export function createWebhookRouter(container: Container): OpenAPIHono<AppEnv> {
   const router = createRouter<AppEnv>()
   router.openapi(status, async (c) => c.json(await receiveFrom(container, 'status', c), 200))
   router.openapi(recording, async (c) => c.json(await receiveFrom(container, 'recording', c), 200))
+  router.openapi(inbound, async (c) => {
+    await Webhooks.receiveInbound(container, await rawCallback(c))
+    // Hold the call past the ring time; the Reps' answer bridges it, the ring timer ends it.
+    const hold = Math.ceil(container.env.RING_TIMEOUT_MS / 1000) + 5
+    return c.body(
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Pause length="${hold}"/></Response>`,
+      200,
+      {
+        'content-type': 'text/xml',
+      }
+    )
+  })
   return router
 }

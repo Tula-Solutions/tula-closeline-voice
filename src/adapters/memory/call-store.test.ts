@@ -107,4 +107,44 @@ describe('the memory Call store', () => {
     const page = await store.list(ORG, { limit: 10, cursor: { createdAt: b.createdAt, id: b.id } })
     expect(page.map((x) => x.id)).toEqual([a.id])
   })
+
+  it('keeps one inbound Call per provider call id', async () => {
+    const store = createMemoryCallStore()
+    const input = {
+      id: formatId('call', crypto.randomUUID()),
+      lineId: formatId('line', crypto.randomUUID()),
+      repMembershipId: null,
+      callerNumber: '+14155550123',
+      providerCallSid: 'CA1',
+      createdAt: T0,
+    }
+    const first = await store.insertInbound(ORG, input)
+    const again = await store.insertInbound(ORG, {
+      ...input,
+      id: formatId('call', crypto.randomUUID()),
+    })
+    expect([first.created, again.created]).toEqual([true, false])
+    expect(again.call.id).toBe(first.call.id)
+    expect((await store.insertInbound(OTHER_ORG, input)).created).toBe(true)
+  })
+
+  it('lets exactly one of two claims of a ringing inbound Call win', async () => {
+    const store = createMemoryCallStore()
+    const { call } = await store.insertInbound(ORG, {
+      id: formatId('call', crypto.randomUUID()),
+      lineId: formatId('line', crypto.randomUUID()),
+      repMembershipId: null,
+      callerNumber: '+14155550123',
+      providerCallSid: 'CA1',
+      createdAt: T0,
+    })
+    const a = formatId('mem', crypto.randomUUID())
+    const b = formatId('mem', crypto.randomUUID())
+    const results = await Promise.all([
+      store.claimInbound(ORG, call.id, a, at(1)),
+      store.claimInbound(ORG, call.id, b, at(1)),
+    ])
+    expect(results.filter((r) => r !== undefined)).toHaveLength(1)
+    expect(await store.claimInbound(OTHER_ORG, call.id, a, at(2))).toBe(undefined)
+  })
 })

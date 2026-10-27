@@ -59,6 +59,11 @@ export type LineStore = {
   ) => Promise<StoredLine | undefined>
   /** Releases a Line and clears its assignment; `undefined` when missing, the Line as is if released. */
   release: (organizationId: string, id: Line['id'], at: Date) => Promise<StoredLine | undefined>
+  /**
+   * The active Line that owns this dialled number, with its Organization, or `undefined`. It is
+   * how an inbound webhook, which knows no Organization yet, finds whose Line was dialled.
+   */
+  byNumber: (number: string) => Promise<{ organizationId: string; line: StoredLine } | undefined>
   /** Forgets the provider id of a released Line once the number is back with the provider. */
   clearProviderSid: (organizationId: string, id: Line['id']) => Promise<void>
 }

@@ -25,6 +25,18 @@ export type NewCall = {
   createdAt: Date
 }
 
+/** What the store needs to create an inbound Call; it starts `ringing`. */
+export type NewInboundCall = {
+  id: VoiceCall['id']
+  lineId: VoiceCall['lineId']
+  /** The Rep whose Line it is, or `null` when a Team's Reps ring and none has answered yet. */
+  repMembershipId: string | null
+  callerNumber: string
+  /** The provider's id for the call; a second insert with it finds the first Call. */
+  providerCallSid: string
+  createdAt: Date
+}
+
 /** A page request. `repMembershipIds` is the visibility filter: `[]` matches nothing. */
 export type CallListQuery = {
   cursor?: CallCursor
@@ -82,6 +94,25 @@ export type CallStore = {
    * insert joins that idempotency transaction.
    */
   insert: (organizationId: string, call: NewCall, within?: IdempotencyScope) => Promise<StoredCall>
+  /**
+   * Creates an inbound Call `ringing`, once per provider call id: a repeat returns the Call the
+   * first insert made with `created: false`.
+   */
+  insertInbound: (
+    organizationId: string,
+    call: NewInboundCall
+  ) => Promise<{ call: StoredCall; created: boolean }>
+  /**
+   * Gives a `ringing` inbound Call to the Rep, moving it to `connecting`, in one conditional
+   * update, so of any number of simultaneous answers exactly one returns the Call. `undefined`
+   * when the Call is not ringing, is not inbound, or belongs to another Rep.
+   */
+  claimInbound: (
+    organizationId: string,
+    id: VoiceCall['id'],
+    repMembershipId: string,
+    at: Date
+  ) => Promise<StoredCall | undefined>
   /** One Call, or `undefined` when this Organization has none with that id. */
   get: (organizationId: string, id: VoiceCall['id']) => Promise<StoredCall | undefined>
   /** The Calls after the cursor, newest first by `(createdAt, id)`, at most `limit`. */

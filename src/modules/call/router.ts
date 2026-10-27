@@ -131,6 +131,30 @@ const wrapUp = createRoute({
   },
 })
 
+const answerInbound = createRoute({
+  method: 'post',
+  path: '/calls/{callId}/answer',
+  tags: ['calls'],
+  summary: 'Answer a ringing inbound Call',
+  description:
+    'A Rep the Call is ringing, whether through the Line assigned to them or their Team. The ' +
+    'first answer gets the Call; the Disclosure plays, then the Rep is bridged. A later answer is ' +
+    "call.not_ringing. Repeating the winner's answer returns the Call as it is.",
+  security,
+  request: { params: voiceCallParamsSchema },
+  responses: {
+    200: callBody('The Call, `live` once the Disclosure has played and the Rep is bridged.'),
+    400: errorResponse('request.invalid'),
+    401: unauthorized,
+    403: errorResponse('auth.forbidden'),
+    404: errorResponse('call.not_found: no such inbound Call is ringing for the caller.'),
+    409: errorResponse('call.not_ringing: another Rep answered, or the Call was missed.'),
+    500: serverError,
+    502: errorResponse('call.disclosure_failed: the Disclosure did not play; the Call failed.'),
+    503: errorResponse('server.unavailable: the telephony provider did not answer.'),
+  },
+})
+
 /** The Calls of the caller's Organization. Mounted behind the access-token middleware. */
 export function createCallRouter(container: Container): OpenAPIHono<AuthedEnv> {
   const router = createRouter<AuthedEnv>()
@@ -157,6 +181,9 @@ export function createCallRouter(container: Container): OpenAPIHono<AuthedEnv> {
       await Calls.wrapUp(container, callerOf(c), c.req.valid('param').callId, c.req.valid('json')),
       200
     )
+  )
+  router.openapi(answerInbound, async (c) =>
+    c.json(await Calls.answer(container, callerOf(c), c.req.valid('param').callId), 200)
   )
 
   return router
