@@ -25,14 +25,14 @@ const post = async (
   t: Awaited<ReturnType<typeof postgresApp>>,
   who: ReturnType<typeof identityOf>,
   body: unknown,
-  key?: string
+  key: string
 ) => {
   const response = await t.app.request('/v1/lines', {
     method: 'POST',
     headers: {
       ...(await t.bearer(who)),
       'content-type': 'application/json',
-      ...(key === undefined ? {} : { 'idempotency-key': key }),
+      'idempotency-key': key,
     },
     body: JSON.stringify(body),
   })

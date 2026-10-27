@@ -187,26 +187,19 @@ async function buyAndRecord(
 }
 
 /**
- * Buys or ports a number and records it as a new, unassigned Line. With an `Idempotency-Key` the
- * Line and the key are written in one transaction, so a repeat of the same request answers with the
+ * Buys or ports a number and records it as a new, unassigned Line. The `Idempotency-Key` and the
+ * Line are written in one transaction, so a repeat of the same request answers with the
  * stored Line (`replayed`) and does not buy or port again.
  */
 export async function add(
   deps: LineDeps,
   caller: Caller,
   request: AddLineRequest,
-  idempotencyKey?: string
+  idempotencyKey: string
 ): Promise<IdempotentAnswer<201, Line>> {
   requireAdmin(caller)
   const held: { providerSid: string | null } = { providerSid: null }
   try {
-    if (idempotencyKey === undefined) {
-      return {
-        status: 201,
-        body: await buyAndRecord(deps, caller, request, held),
-        replayed: false,
-      }
-    }
     return await deps.idempotency.withOrganization(caller.organizationId, (scope) =>
       idempotent(
         deps,
