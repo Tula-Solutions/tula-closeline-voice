@@ -16,6 +16,7 @@ import {
   createTestKeyPair,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
+import { createMemoryAgentSettingsStore } from '~/adapters/memory/agent-settings-store'
 import {
   createMemoryCallEventStore,
   type MemoryCallEventStore,
@@ -34,6 +35,7 @@ import {
   createMemoryOrganizationDirectory,
   type MemoryOrganizationDirectory,
 } from '~/adapters/memory/organization-directory'
+import { createMemoryQualificationQuestionStore } from '~/adapters/memory/qualification-question-store'
 import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
 import { loadEnv } from '~/env'
@@ -111,6 +113,8 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     clock: createFixedClock('2026-01-01T00:00:00Z'),
     tokenVerifier: overrides.tokenVerifier ?? REJECTING_VERIFIER,
     lines: createMemoryLineStore(),
+    agentSettings: createMemoryAgentSettingsStore(),
+    questions: createMemoryQualificationQuestionStore(),
     idempotency: createMemoryIdempotencyStore(),
     numbers: createMemoryNumberProvisioner(),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
