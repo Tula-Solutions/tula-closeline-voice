@@ -1,7 +1,7 @@
-import { and, desc, eq, gte, inArray, lt, lte, type SQL } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, lt, lte, type SQL, sql } from 'drizzle-orm'
 import { AGENT_TOOLS, formatId } from 'tula-closeline-contract'
 import { type Database, withOrganization } from 'tula-closeline-db'
-import { voiceAgentTurnSources, voiceAgentTurns } from 'tula-closeline-db/schema'
+import { voiceAgentTurnSources, voiceAgentTurns, voiceCalls } from 'tula-closeline-db/schema'
 import type {
   AgentTurnStore,
   ConversationRef,
@@ -146,7 +146,7 @@ export function createPostgresAgentTurnStore(db: Database): AgentTurnStore {
       })
     },
 
-    async append(organizationId, conversation, turn: NewAgentTurn) {
+    async append(organizationId, conversation, turn: NewAgentTurn, costMicroCents) {
       return withOrganization(db, organizationId, async (tx) => {
         const inserted = await tx
           .insert(voiceAgentTurns)
@@ -187,7 +187,7 @@ export function createPostgresAgentTurnStore(db: Database): AgentTurnStore {
                 eq(voiceAgentTurnSources.turnId, existing.id)
               )
             )
-          return { turn: toStored(existing, sources), created: false }
+          return { turn: toStored(existing, sources), created: false, callCostMicroCents: null }
         }
         const sourceRows =
           turn.sources.length === 0
@@ -205,7 +205,21 @@ export function createPostgresAgentTurnStore(db: Database): AgentTurnStore {
                   }))
                 )
                 .returning()
-        return { turn: toStored(row, sourceRows), created: true }
+        // One atomic increment in the turn's own transaction: the cost lands exactly when the turn does.
+        let callCostMicroCents: number | null = null
+        if (conversation.kind === 'call' && costMicroCents !== undefined) {
+          const [call] = await tx
+            .update(voiceCalls)
+            .set({
+              agentCostMicroCents: sql`${voiceCalls.agentCostMicroCents} + ${costMicroCents}`,
+            })
+            .where(
+              and(eq(voiceCalls.organizationId, organizationId), eq(voiceCalls.id, conversation.id))
+            )
+            .returning({ total: voiceCalls.agentCostMicroCents })
+          callCostMicroCents = call === undefined ? null : Number(call.total)
+        }
+        return { turn: toStored(row, sourceRows), created: true, callCostMicroCents }
       })
     },
   }

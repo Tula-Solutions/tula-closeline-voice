@@ -97,7 +97,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 in its `INTERNAL_API_TOKENS`; set together; required outside local, where unset means an empty
 in-memory directory),
 and the purge schedule keys `TWILIO_PURGE_INTERVAL_MS` (default 900000) and
-`TWILIO_PURGE_MAX_ORGANIZATIONS` (default 200), `TWILIO_PURGE_QUERY_TIMEOUT_MS` (default 10000), `RING_TIMEOUT_MS` (default 30000), `MISSED_SWEEP_INTERVAL_MS` (default 5000) and `MISSED_SWEEP_MAX_ORGANIZATIONS` (default 200). The deployment keys have
+`TWILIO_PURGE_MAX_ORGANIZATIONS` (default 200), `TWILIO_PURGE_QUERY_TIMEOUT_MS` (default 10000), `RING_TIMEOUT_MS` (default 30000), `MISSED_SWEEP_INTERVAL_MS` (default 5000) and `MISSED_SWEEP_MAX_ORGANIZATIONS` (default 200), and the Agent's vendor prices in micro-cents per unit, `STT_PRICE_MICRO_CENTS_PER_SECOND`, `TTS_PRICE_MICRO_CENTS_PER_CHARACTER`, `LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN` and `LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN` (local defaults, required elsewhere). The deployment keys have
 local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_ENDPOINT` and
 `STORAGE_ENDPOINT` are local-only. Add a key in both files.
 
@@ -105,7 +105,10 @@ local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_
 
 The per-request middleware stack (`createBaseApp`) and `/healthz`, and the Twilio webhook handler
 (`Webhooks.receive`, `POST /webhooks/twilio/*`: signature check, then one idempotent insert; O(body
-size)). Budgets are in `bench/` (`bench/webhook.bench.test.ts`).
+size), and one Agent turn on a live Call (`AgentCall.hear`: Call read, cap check, `converse`
+with its idempotent turn inserts and one atomic cost add, streaming TTS; O(1) in the Organization,
+and reads a bounded window of recent turns). Budgets are in `bench/` (`bench/webhook.bench.test.ts`,
+`bench/agent-turn.bench.test.ts`).
 
 A benchmark times `measure(operation)`: a warm-up, then several batches, gated on the fastest, so a
 noisy runner cannot fail it but a real regression (every batch slower) does. Budget is about 5x the

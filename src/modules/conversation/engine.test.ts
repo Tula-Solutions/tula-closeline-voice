@@ -277,3 +277,52 @@ describe('the conversation engine in text mode', () => {
     ).rejects.toBeDefined()
   })
 })
+
+describe('the conversation engine when the reply is spoken', () => {
+  const input = (c: ReturnType<typeof conversation>) => ({
+    organizationId: org,
+    conversation: c,
+    turnIndex: 0,
+    text: 'How much is the Team plan?',
+  })
+
+  test('stores only the words that were heard, never the rest of the reply', async () => {
+    t.llm.reply(answer())
+    const c = conversation()
+    const result = await Conversation.converse(t, input(c), {
+      speak: async () => ({ spoken: 'The Team plan', costMicroCents: 10 }),
+    })
+    expect(result.agentTurn.text).toBe('The Team plan')
+    expect((await t.turns.get(org, c, 1))?.text).toBe('The Team plan')
+    expect((await t.turns.recent(org, c, 10, 10)).map((turn) => turn.text).join(' ')).not.toContain(
+      '40 dollars'
+    )
+  })
+
+  test('stores a placeholder when the Prospect cut in before a word was said', async () => {
+    t.llm.reply(answer())
+    const c = conversation()
+    const result = await Conversation.converse(t, input(c), {
+      speak: async () => ({ spoken: '', costMicroCents: 0 }),
+    })
+    expect(result.agentTurn.text).toBe(Conversation.UNSPOKEN_PLACEHOLDER)
+  })
+
+  test('hands the speaker the reply and the tokens it cost, and nothing on a replay', async () => {
+    t.llm.reply({ text: answer(), inputTokens: 120, outputTokens: 30 })
+    const c = conversation()
+    const seen: { reply: string; tokens: number }[] = []
+    const speak: NonNullable<Conversation.ConverseOptions['speak']> = async (generated) => {
+      seen.push({
+        reply: generated.reply,
+        tokens: generated.usage.inputTokens + generated.usage.outputTokens,
+      })
+      return { spoken: generated.reply, costMicroCents: 1 }
+    }
+    await Conversation.converse(t, input(c), { speak })
+    const again = await Conversation.converse(t, input(c), { speak })
+    expect(seen).toEqual([{ reply: expect.stringContaining('40 dollars'), tokens: 150 }])
+    expect(again.replayed).toBe(true)
+    expect(again.callCostMicroCents).toBeNull()
+  })
+})

@@ -6,7 +6,7 @@ import {
   type OrganizationId,
   type SearchTurn,
 } from 'tula-closeline-contract'
-import { LlmError } from 'tula-closeline-kit'
+import { LlmError, type LlmUsage } from 'tula-closeline-kit'
 import type { Container } from '~/container'
 import { domainError } from '~/http/domain-error'
 import * as Agent from '~/modules/agent-settings/service'
@@ -51,6 +51,21 @@ export const DEFERRAL_REPLY =
 /** The longest quote kept with a stored source. */
 const MAX_PASSAGE_QUOTE = 512
 
+/** What the Agent stores when a Prospect cut it off before it said a word. */
+export const UNSPOKEN_PLACEHOLDER = '…'
+
+/** What speaking the reply produced: the words that were heard and what hearing, thinking and speaking cost. */
+export type SpokenReply = { spoken: string; costMicroCents: number }
+
+/** Optional behaviour of {@link converse} for a spoken conversation. */
+export type ConverseOptions = {
+  /**
+   * Speaks the reply aloud. The Agent turn then stores only what it returns as `spoken`, never the
+   * unspoken rest, and adds `costMicroCents` to the Call in the same step. Not called on a replay.
+   */
+  speak?: (generated: { reply: string; usage: LlmUsage }) => Promise<SpokenReply>
+}
+
 /** What one exchange produced. */
 export type ConverseResult = {
   /** The Agent's reply text. */
@@ -67,6 +82,8 @@ export type ConverseResult = {
   prospectTurn: StoredAgentTurn
   /** The stored Agent turn. */
   agentTurn: StoredAgentTurn
+  /** The Call's cost in micro-cents after this exchange; `null` when none was added. */
+  callCostMicroCents: number | null
 }
 
 /** Search turns from the latest turns, newest first within the character budget, oldest first out. */
@@ -108,13 +125,17 @@ type Generated = {
   sources: TurnSource[]
   deferred: boolean
   toolCall: ToolCall | null
+  usage: LlmUsage
 }
 
-const deferral = (): Generated => ({
+const NO_USAGE: LlmUsage = { inputTokens: 0, outputTokens: 0 }
+
+const deferral = (usage: LlmUsage = NO_USAGE): Generated => ({
   reply: DEFERRAL_REPLY,
   sources: [],
   deferred: true,
   toolCall: null,
+  usage,
 })
 
 /**
@@ -125,7 +146,8 @@ const deferral = (): Generated => ({
  */
 export async function converse(
   deps: ConversationDeps,
-  input: ConverseInput
+  input: ConverseInput,
+  options: ConverseOptions = {}
 ): Promise<ConverseResult> {
   const parsed = converseInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -146,6 +168,7 @@ export async function converse(
         replayed: true,
         prospectTurn,
         agentTurn: stored,
+        callCostMicroCents: null,
       }
     }
   }
@@ -162,14 +185,27 @@ export async function converse(
   })
 
   const generated = await generate(deps, organizationId, history, prospectTurn.text)
-  const { turn: agentTurn, created } = await deps.turns.append(organizationId, conversation, {
-    index: turnIndex + 1,
-    role: 'agent',
-    text: generated.reply,
-    deferred: generated.deferred,
-    toolName: generated.toolCall?.name ?? null,
-    sources: generated.sources,
-  })
+  const spoken =
+    options.speak === undefined
+      ? undefined
+      : await options.speak({ reply: generated.reply, usage: generated.usage })
+  const {
+    turn: agentTurn,
+    created,
+    callCostMicroCents,
+  } = await deps.turns.append(
+    organizationId,
+    conversation,
+    {
+      index: turnIndex + 1,
+      role: 'agent',
+      text: spoken === undefined ? generated.reply : spoken.spoken || UNSPOKEN_PLACEHOLDER,
+      deferred: generated.deferred,
+      toolName: generated.toolCall?.name ?? null,
+      sources: generated.sources,
+    },
+    spoken?.costMicroCents
+  )
   // A concurrent retry stored its reply first: this one wins nothing and must not run its tool.
   return {
     reply: agentTurn.text,
@@ -179,6 +215,7 @@ export async function converse(
     replayed: !created,
     prospectTurn,
     agentTurn,
+    callCostMicroCents,
   }
 }
 
@@ -216,6 +253,7 @@ async function generate(
     examples: found.moments.slice(0, MAX_WORDING_EXAMPLES),
   })
   let reply: ReturnType<typeof modelReplySchema.parse>
+  let usage = NO_USAGE
   try {
     const completion = await deps.llm.complete({
       organizationId: organizationId as OrganizationId,
@@ -228,6 +266,7 @@ async function generate(
       maxOutputTokens: REPLY_MAX_OUTPUT_TOKENS,
     })
     reply = completion.value
+    usage = completion.usage
   } catch (error) {
     if (error instanceof LlmError && error.code === 'llm.invalid_output') {
       // Includes a tool outside the closed set or arguments of the wrong shape.
@@ -239,17 +278,17 @@ async function generate(
 
   if (reply.toolCall !== null && !AGENT_TOOLS.some((tool) => tool === reply.toolCall?.name)) {
     deps.logger.warn('agent reply rejected', { reason: 'tool_not_allowed' })
-    return deferral()
+    return deferral(usage)
   }
   if (reply.deferred) {
-    return { reply: reply.reply, sources: [], deferred: true, toolCall: reply.toolCall }
+    return { reply: reply.reply, sources: [], deferred: true, toolCall: reply.toolCall, usage }
   }
   const cited = sourcesOf(reply.sources, passages)
   if (cited === 'unknown' || cited.length === 0) {
     deps.logger.warn('agent reply rejected', {
       reason: cited === 'unknown' ? 'unknown_source' : 'no_source',
     })
-    return deferral()
+    return deferral(usage)
   }
   return {
     reply: reply.reply,
@@ -260,5 +299,6 @@ async function generate(
     })),
     deferred: false,
     toolCall: reply.toolCall,
+    usage,
   }
 }

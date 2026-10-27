@@ -11,7 +11,11 @@ import type { IdempotencyScope } from '~/ports/idempotency-store'
 export type CallCursor = z.infer<typeof voiceCallCursorSchema>
 
 /** A Call as stored: the contract's Call plus the provider's id for it, never returned. */
-export type StoredCall = VoiceCall & { providerCallSid: string | null }
+export type StoredCall = VoiceCall & {
+  providerCallSid: string | null
+  /** What the Agent's speech, hearing and thinking have cost so far, in micro-cents; never returned. */
+  agentCostMicroCents: number
+}
 
 /** What the store needs to create an outbound Call; it starts `ringing`. */
 export type NewCall = {
@@ -61,6 +65,13 @@ export type CallTransition = {
   /** Required to fail a Call, and only then. */
   failureReason?: VoiceCallFailureReason
   endedBy?: NonNullable<VoiceCall['endedBy']>
+  /** Why an `ended` Call ended; allowed only with `ended`. */
+  endReason?: NonNullable<VoiceCall['endReason']>
+  /**
+   * Set when the Agent answered the Call: it may then go `live` only after a Disclosure that said
+   * an AI is speaking, so a recording-only wording can never open an Agent's Call.
+   */
+  agent?: true
 }
 
 /** One entry of a Call's ordered event log, as the tests and the timeline read it. */
@@ -111,6 +122,16 @@ export type CallStore = {
     organizationId: string,
     id: VoiceCall['id'],
     repMembershipId: string,
+    at: Date
+  ) => Promise<StoredCall | undefined>
+  /**
+   * Gives a `ringing` inbound Call that no Rep holds to the Agent, moving it to `connecting`, in
+   * one conditional update, so the Agent and a Rep never both answer it. `undefined` when the Call
+   * is not ringing, is not inbound, or already belongs to a Rep.
+   */
+  claimForAgent: (
+    organizationId: string,
+    id: VoiceCall['id'],
     at: Date
   ) => Promise<StoredCall | undefined>
   /**

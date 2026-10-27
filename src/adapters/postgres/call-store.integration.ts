@@ -9,12 +9,14 @@ import {
   InvalidTransitionError,
   type NewCall,
 } from '~/ports/call-store'
+import { createPostgresAgentTurnStore } from './agent-turn-store'
 import { createPostgresCallStore } from './call-store'
 import { createPostgresLineStore } from './line-store'
 
 const { db, close } = createDb(integrationUrls().service)
 const calls: CallStore = createPostgresCallStore(db)
 const lines = createPostgresLineStore(db)
+const turns = createPostgresAgentTurnStore(db)
 
 afterAll(close)
 
@@ -251,5 +253,101 @@ describe('the Postgres Call store', () => {
         e.kind === 'state_changed' ? e.toState : e.kind
       )
     ).toEqual(['ringing', 'missed'])
+  })
+  /** An inbound Call no Rep holds, still ringing. */
+  async function ringingForAgent(org: OrganizationId) {
+    const base = await callFor(org)
+    const { call } = await calls.insertInbound(org, {
+      id: base.id,
+      lineId: base.lineId,
+      repMembershipId: null,
+      callerNumber: '+14155550123',
+      providerCallSid: `CA${crypto.randomUUID().replaceAll('-', '')}`,
+      createdAt: T0,
+    })
+    return call
+  }
+
+  test('of many simultaneous Agent claims exactly one wins, and a Rep-held Call is never the Agent’s', async () => {
+    const org = newOrganization()
+    const call = await ringingForAgent(org)
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () => calls.claimForAgent(org, call.id, at(1)))
+    )
+    expect(results.filter((result) => result !== undefined)).toHaveLength(1)
+    const base = await callFor(org)
+    const held = await calls.insertInbound(org, {
+      id: base.id,
+      lineId: base.lineId,
+      repMembershipId: formatId('mem', crypto.randomUUID()),
+      callerNumber: '+14155550124',
+      providerCallSid: `CA${crypto.randomUUID().replaceAll('-', '')}`,
+      createdAt: T0,
+    })
+    expect(await calls.claimForAgent(org, held.call.id, at(1))).toBeUndefined()
+    expect(await calls.claimForAgent(newOrganization(), call.id, at(1))).toBeUndefined()
+  })
+
+  test('an Agent Call cannot go live on a Disclosure that did not say an AI speaks, and stores its end reason', async () => {
+    const org = newOrganization()
+    const call = await ringingForAgent(org)
+    await calls.claimForAgent(org, call.id, at(1))
+    await calls.transition(org, call.id, { to: 'disclosing', at: at(2) })
+    await calls.recordDisclosure(org, call.id, {
+      wordingVersion: 1,
+      aiAssisted: false,
+      playedAt: at(3),
+    })
+    await expect(
+      calls.transition(org, call.id, { to: 'live', at: at(4), agent: true })
+    ).rejects.toBeInstanceOf(InvalidTransitionError)
+    expect((await calls.get(org, call.id))?.state).toBe('disclosing')
+
+    const other = await ringingForAgent(org)
+    await calls.claimForAgent(org, other.id, at(1))
+    await calls.transition(org, other.id, { to: 'disclosing', at: at(2) })
+    await calls.recordDisclosure(org, other.id, {
+      wordingVersion: 2,
+      aiAssisted: true,
+      playedAt: at(3),
+    })
+    await expect(
+      calls.transition(org, other.id, { to: 'live', at: at(4), endReason: 'cost_cap' })
+    ).rejects.toBeInstanceOf(InvalidTransitionError)
+    await calls.transition(org, other.id, { to: 'live', at: at(4), agent: true })
+    const ended = await calls.transition(org, other.id, {
+      to: 'ended',
+      at: at(9),
+      endedBy: 'system',
+      endReason: 'duration_cap',
+    })
+    expect(ended).toMatchObject({ state: 'ended', endReason: 'duration_cap' })
+    expect((await calls.get(org, other.id))?.endReason).toBe('duration_cap')
+  })
+
+  test('a turn adds its cost to the Call once, even when stored twice or at the same time', async () => {
+    const org = newOrganization()
+    const call = await ringingForAgent(org)
+    const conversation = { kind: 'call', id: call.id } as const
+    const turn = (index: number) => ({
+      index,
+      role: 'agent' as const,
+      text: `turn ${index}`,
+      deferred: false,
+      toolName: null,
+      sources: [],
+    })
+    const first = await turns.append(org, conversation, turn(1), 700)
+    expect(first).toMatchObject({ created: true, callCostMicroCents: 700 })
+    const replay = await turns.append(org, conversation, turn(1), 700)
+    expect(replay).toMatchObject({ created: false, callCostMicroCents: null })
+    const racers = await Promise.all(
+      Array.from({ length: 6 }, () => turns.append(org, conversation, turn(3), 100))
+    )
+    expect(racers.filter((racer) => racer.created)).toHaveLength(1)
+    expect((await calls.get(org, call.id))?.agentCostMicroCents).toBe(800)
+    // Another Organization cannot store a turn on, or add cost to, this Call.
+    await expect(turns.append(newOrganization(), conversation, turn(5), 999)).rejects.toThrow()
+    expect((await calls.get(org, call.id))?.agentCostMicroCents).toBe(800)
   })
 })

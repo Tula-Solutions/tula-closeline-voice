@@ -11,7 +11,14 @@ const keyOf = (organizationId: string, c: ConversationRef) =>
   `${organizationId}\u0000${c.kind}\u0000${c.id}`
 
 /** An in-memory {@link AgentTurnStore} for tests and local runs. */
-export function createMemoryAgentTurnStore(now: () => Date = () => new Date()): AgentTurnStore {
+export function createMemoryAgentTurnStore(
+  now: () => Date = () => new Date(),
+  addCost: (
+    organizationId: string,
+    callId: string,
+    microCents: number
+  ) => number | undefined = () => undefined
+): AgentTurnStore {
   const byConversation = new Map<string, Map<number, StoredAgentTurn>>()
   return {
     async get(organizationId, conversation, index) {
@@ -31,13 +38,13 @@ export function createMemoryAgentTurnStore(now: () => Date = () => new Date()): 
         .sort((a, b) => a.index - b.index)
       return structuredClone(turns.slice(0, MAX_RECENT_TURNS))
     },
-    async append(organizationId, conversation, turn: NewAgentTurn) {
+    async append(organizationId, conversation, turn: NewAgentTurn, costMicroCents) {
       const key = keyOf(organizationId, conversation)
       const turns = byConversation.get(key) ?? new Map<number, StoredAgentTurn>()
       byConversation.set(key, turns)
       const existing = turns.get(turn.index)
       if (existing !== undefined) {
-        return { turn: structuredClone(existing), created: false }
+        return { turn: structuredClone(existing), created: false, callCostMicroCents: null }
       }
       const stored: StoredAgentTurn = {
         ...structuredClone(turn),
@@ -45,7 +52,11 @@ export function createMemoryAgentTurnStore(now: () => Date = () => new Date()): 
         createdAt: now().toISOString(),
       }
       turns.set(turn.index, stored)
-      return { turn: structuredClone(stored), created: true }
+      const callCostMicroCents =
+        conversation.kind === 'call' && costMicroCents !== undefined
+          ? (addCost(organizationId, conversation.id, costMicroCents) ?? null)
+          : null
+      return { turn: structuredClone(stored), created: true, callCostMicroCents }
     },
   }
 }

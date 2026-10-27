@@ -6756,6 +6756,20 @@
                             null
                           ]
                         },
+                        "endReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "duration_cap",
+                            "cost_cap",
+                            "agent_ended",
+                            "prospect_hung_up",
+                            "rep_ended",
+                            null
+                          ]
+                        },
                         "dealId": {
                           "type": [
                             "string",
@@ -6997,6 +7011,20 @@
                             "rep_unreachable",
                             "provider_error",
                             "timeout",
+                            null
+                          ]
+                        },
+                        "endReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "duration_cap",
+                            "cost_cap",
+                            "agent_ended",
+                            "prospect_hung_up",
+                            "rep_ended",
                             null
                           ]
                         },
@@ -7718,6 +7746,20 @@
                               null
                             ]
                           },
+                          "endReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "duration_cap",
+                              "cost_cap",
+                              "agent_ended",
+                              "prospect_hung_up",
+                              "rep_ended",
+                              null
+                            ]
+                          },
                           "dealId": {
                             "type": [
                               "string",
@@ -8143,6 +8185,20 @@
                         "rep_unreachable",
                         "provider_error",
                         "timeout",
+                        null
+                      ]
+                    },
+                    "endReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "duration_cap",
+                        "cost_cap",
+                        "agent_ended",
+                        "prospect_hung_up",
+                        "rep_ended",
                         null
                       ]
                     },
@@ -8623,6 +8679,20 @@
                         null
                       ]
                     },
+                    "endReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "duration_cap",
+                        "cost_cap",
+                        "agent_ended",
+                        "prospect_hung_up",
+                        "rep_ended",
+                        null
+                      ]
+                    },
                     "dealId": {
                       "type": [
                         "string",
@@ -9070,6 +9140,20 @@
                         "rep_unreachable",
                         "provider_error",
                         "timeout",
+                        null
+                      ]
+                    },
+                    "endReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "duration_cap",
+                        "cost_cap",
+                        "agent_ended",
+                        "prospect_hung_up",
+                        "rep_ended",
                         null
                       ]
                     },

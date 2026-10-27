@@ -25,14 +25,14 @@
     "@hono/zod-openapi": "^1.6.3",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
-    "tula-closeline-contract": "git+ssh://git@github.com/Tula-Solutions/tula-closeline-contract.git#v0.57.0",
-    "tula-closeline-db": "git+ssh://git@github.com/Tula-Solutions/tula-closeline-db.git#v0.60.0",
+    "tula-closeline-contract": "git+ssh://git@github.com/Tula-Solutions/tula-closeline-contract.git#v0.58.0",
+    "tula-closeline-db": "git+ssh://git@github.com/Tula-Solutions/tula-closeline-db.git#v0.61.0",
     "tula-closeline-kit": "git+ssh://git@github.com/Tula-Solutions/tula-closeline-kit.git#v0.28.2",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
-    "bun-types": "^1.4.2",
+    "@biomejs/biome": "^2.6.3",
+    "bun-types": "^1.4.4",
     "husky": "^9.1.7",
     "typescript": "^7.0.2"
   }
