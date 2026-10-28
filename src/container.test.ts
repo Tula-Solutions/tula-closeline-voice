@@ -207,7 +207,7 @@ test('a local run registers the publishable Chat key for the configured Organiza
   )
   const site = await container.chatSites.ofKey(LOCAL_CHAT_KEY)
   expect(site?.organizationId).toBe(organizationId)
-  expect(site?.allowedOrigins).toContain('http://localhost:5173')
+  expect(site?.allowedOrigins).toContain('http://localhost:3002')
   expect(lines.some((l) => l.includes(LOCAL_CHAT_KEY))).toBe(true)
 
   const bare = createContainer(loadEnv({ ENVIRONMENT: 'local' }))

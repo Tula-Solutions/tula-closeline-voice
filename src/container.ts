@@ -332,7 +332,7 @@ function createChatSites(env: Env, logger: Logger): ChatSites {
   }
   const sites = createMemoryChatSites()
   if (env.LOCAL_CHAT_ORGANIZATION_ID !== undefined) {
-    const allowedOrigins = (env.LOCAL_CHAT_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173')
+    const allowedOrigins = (env.LOCAL_CHAT_ORIGINS ?? 'http://localhost:3002,http://127.0.0.1:3002')
       .split(',')
       .map((origin) => origin.trim())
       .filter((origin) => origin !== '')
