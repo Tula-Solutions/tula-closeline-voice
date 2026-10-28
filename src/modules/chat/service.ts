@@ -65,6 +65,9 @@ export const CHAT_SESSIONS_PER_SITE_PER_MINUTE = 30
 /** The most new Chats one client address may start on one site a minute. */
 export const CHAT_SESSIONS_PER_IP_PER_MINUTE = 5
 
+/** The most visitor messages one Chat takes a minute, so one visitor cannot use up the site's. */
+export const CHAT_MESSAGES_PER_CHAT_PER_MINUTE = 10
+
 /** The most visitor messages one site takes a minute, all Chats together; each one is a model call. */
 export const CHAT_MESSAGES_PER_SITE_PER_MINUTE = 120
 
@@ -264,6 +267,7 @@ export async function send(
   input: { token: string; origin: string; idempotencyKey: string; text: string }
 ): Promise<{ body: PublicChatMessageReply; replayed: boolean }> {
   const { organizationId, chat } = await sessionOf(deps, input.token, input.origin)
+  await limit(deps, organizationId, 'messages-chat', chat.id, CHAT_MESSAGES_PER_CHAT_PER_MINUTE)
   await limit(deps, organizationId, 'messages', '', CHAT_MESSAGES_PER_SITE_PER_MINUTE)
   // The model call runs outside any transaction: the key is claimed first and completed after.
   const answer = await idempotentOutside(

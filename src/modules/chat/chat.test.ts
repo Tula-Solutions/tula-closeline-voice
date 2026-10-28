@@ -5,6 +5,7 @@ import { createTestApp, newOrganizationId, type TestApp } from '~/testing'
 import {
   CHAT_DISCLOSURE_VERSION,
   CHAT_DISCLOSURE_WORDING,
+  CHAT_MESSAGES_PER_CHAT_PER_MINUTE,
   CHAT_MESSAGES_PER_SITE_PER_MINUTE,
   CHAT_SESSIONS_PER_IP_PER_MINUTE,
   CHAT_SESSIONS_PER_SITE_PER_MINUTE,
@@ -245,9 +246,13 @@ describe('sending messages', () => {
   test('stops taking messages after the per-Chat cap', async () => {
     const token = await open()
     for (let i = 0; i < MAX_CHAT_MESSAGES; i += 1) {
+      if (i % CHAT_MESSAGES_PER_CHAT_PER_MINUTE === 0) {
+        t.deps.clock.advance('1m')
+      }
       t.deps.llm.reply(reply('ok'))
       expect((await send(token, `m${i}`)).status).toBe(200)
     }
+    t.deps.clock.advance('1m')
     const over = await send(token, 'one more')
     expect([over.status, code(over)]).toEqual([409, 'chat.session_closed'])
   })
@@ -372,14 +377,30 @@ describe('rate limits', () => {
   })
 
   test('the site as a whole takes only so many messages a minute', async () => {
-    const tokens = [await open(), await open()]
+    const chats = CHAT_MESSAGES_PER_SITE_PER_MINUTE / CHAT_MESSAGES_PER_CHAT_PER_MINUTE
+    const tokens: string[] = []
+    for (let c = 0; c < chats + 1; c += 1) {
+      tokens.push((await start(startKey(), {}, `10.1.0.${c}`)).body.sessionToken as string)
+    }
     for (let i = 0; i < CHAT_MESSAGES_PER_SITE_PER_MINUTE; i += 1) {
       t.deps.llm.reply(reply('ok'))
-      expect((await send(tokens[i % 2] as string, `m${i}`)).status).toBe(200)
+      expect((await send(tokens[i % chats] as string, `m${i}`)).status).toBe(200)
     }
-    const over = await send(tokens[0] as string, 'one more')
+    const over = await send(tokens[chats] as string, 'one more')
     expect([over.status, code(over)]).toEqual([429, 'rate.limited'])
     expect(t.deps.llm.requests()).toHaveLength(CHAT_MESSAGES_PER_SITE_PER_MINUTE)
+  })
+
+  test('one Chat cannot use up the quota of the site', async () => {
+    const [noisy, quiet] = [await open(), await open()]
+    for (let i = 0; i < CHAT_MESSAGES_PER_CHAT_PER_MINUTE; i += 1) {
+      t.deps.llm.reply(reply('ok'))
+      expect((await send(noisy, `m${i}`)).status).toBe(200)
+    }
+    const over = await send(noisy, 'one more')
+    expect([over.status, code(over)]).toEqual([429, 'rate.limited'])
+    t.deps.llm.reply(reply('ok'))
+    expect((await send(quiet, 'hello')).status).toBe(200)
   })
 
   test('a call with an unknown key or a foreign origin does not use up the limit', async () => {
