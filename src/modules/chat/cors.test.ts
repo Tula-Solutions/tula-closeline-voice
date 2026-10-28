@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { formatId } from 'tula-closeline-contract'
 import { createTestApp, newOrganizationId, type TestApp } from '~/testing'
-import { CHAT_WORDING_PER_IP_PER_MINUTE } from './service'
+import { CHAT_WORDING_PER_IP_PER_MINUTE, CHAT_WORDING_PER_SITE_PER_MINUTE } from './service'
 
 const ORIGIN = 'https://acme.example'
 const FOREIGN = 'https://evil.example'
@@ -126,5 +126,17 @@ describe('the consent wording route', () => {
     expect([over.status, body.error.code]).toEqual([429, 'rate.limited'])
     expect(Number(over.headers.get('retry-after'))).toBeGreaterThan(0)
     expect(over.headers.get('access-control-allow-origin')).toBe(ORIGIN)
+  })
+
+  test('is rate limited for the site as a whole, whatever the addresses', async () => {
+    for (let i = 0; i < CHAT_WORDING_PER_SITE_PER_MINUTE; i += 1) {
+      const response = await t.app.request(
+        `/v1/public/chat/${KEY}/consent-wording`,
+        { headers: { origin: ORIGIN } },
+        { requestIP: () => ({ address: `10.${i >> 8}.${i & 255}.1` }) }
+      )
+      expect(response.status).toBe(200)
+    }
+    expect((await read()).status).toBe(429)
   })
 })
