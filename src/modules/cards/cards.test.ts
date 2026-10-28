@@ -41,6 +41,19 @@ describe('retrieval cards', () => {
     expect(card?.quotes.map((q) => q.prospect)).toEqual(found.map((m) => m.prospect))
   })
 
+  it('uses the Organization own minimums', async () => {
+    await deps.copilotSettings.put(org, {
+      enabled: true,
+      minMoments: 1,
+      minDeals: 1,
+      updatedAt: null,
+      updatedBy: null,
+    })
+    deps.evidence.load(org, { moments: moments(1) })
+    await Cards.onProspectTurn(deps, org, call, WINDOW, never)
+    expect(await stored()).toHaveLength(1)
+  })
+
   it('takes the evidence count from the Playbook, not from the few Moments it returned', async () => {
     deps.evidence.load(org, { moments: moments(2) }, { moments: 9, deals: 4 })
     await Cards.onProspectTurn(deps, org, call, WINDOW, never)

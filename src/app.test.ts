@@ -38,6 +38,7 @@ test('the app serves its OpenAPI document describing every route and the error b
     '/v1/calls/{callId}/recording',
     '/v1/calls/{callId}/transcript',
     '/v1/calls/{callId}/wrap-up',
+    '/v1/copilot/settings',
     '/v1/handoffs',
     '/v1/handoffs/{handoffId}',
     '/v1/handoffs/{handoffId}/accept',

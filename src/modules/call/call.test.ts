@@ -180,6 +180,7 @@ describe('placing a Call', () => {
   )
 
   it('uses the stored Copilot setting when another instance receives the answer', async () => {
+    await t.call(admin, 'PUT', '/copilot/settings', { enabled: true, minMoments: 3, minDeals: 2 })
     const { body } = await place(rep, { to: PROSPECT, copilot: true })
     const id = (body as PlacedBody).call.id
     // A fresh process memory stands for another instance or a restart.
