@@ -180,3 +180,44 @@ test('onlineRepsOfTeam fails closed on a timeout', async () => {
   })
   await expect(slow.onlineRepsOfTeam(ORG, TEAM)).rejects.toMatchObject(unavailable)
 })
+
+test('isMember posts to member-check and returns the answer', async () => {
+  const { directory, calls } = setup([json({ isMember: true })])
+  expect(await directory.isMember(ORG, MEM)).toBe(true)
+  expect(calls[0]?.url).toBe('http://core.test/internal/v1/directory/member-check')
+  expect(calls[0]?.body).toEqual({ organizationId: ORG, membershipId: MEM })
+})
+
+test('teamsOf posts to teams-of and returns the Team ids', async () => {
+  const { directory, calls } = setup([json({ teamIds: [TEAM] })])
+  expect(await directory.teamsOf(ORG, MEM)).toEqual([TEAM])
+  expect(calls[0]?.url).toBe('http://core.test/internal/v1/directory/teams-of')
+  expect(calls[0]?.body).toEqual({ organizationId: ORG, membershipId: MEM })
+})
+
+test('roleMembers follows next across pages and stops at the cap of 50', async () => {
+  const id = (n: number) => `mem_${n.toString(16).padStart(32, '0')}`
+  const page = (from: number, count: number, next: string | null) =>
+    json({ membershipIds: Array.from({ length: count }, (_, i) => id(from + i)), next })
+  const { directory, calls } = setup([
+    page(0, 30, id(29)),
+    page(30, 30, id(59)),
+    page(60, 30, null),
+  ])
+  const ids = await directory.roleMembers(ORG, 'admin')
+  expect(ids).toHaveLength(50)
+  expect(calls).toHaveLength(2)
+  expect(calls[0]?.body).toEqual({ organizationId: ORG, role: 'admin' })
+  expect(calls[1]?.body).toEqual({ organizationId: ORG, role: 'admin', after: id(29) })
+})
+
+test('roleMembers stops on the last page', async () => {
+  const { directory, calls } = setup([json({ membershipIds: [MEM], next: null })])
+  expect(await directory.roleMembers(ORG, 'rep')).toEqual([MEM])
+  expect(calls).toHaveLength(1)
+})
+
+test('the new lookups fail closed on a body the contract rejects', async () => {
+  const { directory } = setup([json({ nope: 1 })])
+  await expect(directory.teamsOf(ORG, MEM)).rejects.toMatchObject(unavailable)
+})
