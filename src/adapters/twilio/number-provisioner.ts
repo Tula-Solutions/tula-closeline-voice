@@ -189,6 +189,11 @@ export function createTwilioNumberProvisioner(
     },
 
     async port(number, signal) {
+      // The account record carries no country, so only a known dialling code can be attached.
+      const country = COUNTRY_BY_PREFIX.find(([prefix]) => number.startsWith(prefix))?.[1]
+      if (!country) {
+        throw domainError(VOICE_ERRORS['line.number_unavailable'])
+      }
       const found = await read(
         `/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(number)}`,
         signal
@@ -199,7 +204,9 @@ export function createTwilioNumberProvisioner(
       const owned = first(found.json, 'incoming_phone_numbers')
       const sid = str(owned?.sid)
       // Real porting is a later ticket: a number outside the account is refused.
-      if (!sid) {
+      // A number Closeline bought may already be a Line; attaching it again would let a failed
+      // insert's release delete it.
+      if (!sid || str(owned?.friendly_name) === BOUGHT_BY_CLOSELINE) {
         throw domainError(VOICE_ERRORS['line.number_unavailable'])
       }
       const updated = await write(
@@ -211,7 +218,6 @@ export function createTwilioNumberProvisioner(
       if (!ok(updated)) {
         throw unavailable()
       }
-      const country = COUNTRY_BY_PREFIX.find(([prefix]) => number.startsWith(prefix))?.[1] ?? 'US'
       return toNumber(updated.json, country)
     },
 

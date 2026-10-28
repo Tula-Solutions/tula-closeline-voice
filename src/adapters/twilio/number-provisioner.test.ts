@@ -98,6 +98,27 @@ describe('twilio number provisioner', () => {
     expect(calls).toHaveLength(1)
   })
 
+  test('port refuses a number Closeline bought, so a later release cannot delete it', async () => {
+    const { calls, numbers } = setup([
+      {
+        status: 200,
+        json: { incoming_phone_numbers: [{ ...owned, friendly_name: BOUGHT_BY_CLOSELINE }] },
+      },
+    ])
+    await expect(numbers.port('+14155550100', signal)).rejects.toMatchObject({
+      code: 'line.number_unavailable',
+    })
+    expect(calls).toHaveLength(1)
+  })
+
+  test('port refuses a country voice does not sell in, before any call', async () => {
+    const { calls, numbers } = setup([])
+    await expect(numbers.port('+33123456789', signal)).rejects.toMatchObject({
+      code: 'line.number_unavailable',
+    })
+    expect(calls).toHaveLength(0)
+  })
+
   test('release deletes a number Closeline bought', async () => {
     const { calls, numbers } = setup([
       { status: 200, json: { ...owned, friendly_name: BOUGHT_BY_CLOSELINE } },
