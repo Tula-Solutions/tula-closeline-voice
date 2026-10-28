@@ -144,6 +144,19 @@ export function createCoreHttpOrganizationDirectory(
           internalDirectoryRepCheckResponseSchema
         )
       ).isRep,
+    // shortcut: core has no member-check, role-members or teams-of route yet, so a non-Rep member
+    // is not found, a role rings nobody and a Team Line is not found for a caller; add the routes
+    // in core and the contract, then call them here.
+    isMember: async (organizationId, membershipId) =>
+      (
+        await call(
+          '/internal/v1/directory/rep-check',
+          { organizationId, membershipId },
+          internalDirectoryRepCheckResponseSchema
+        )
+      ).isRep,
+    roleMembers: async () => [],
+    teamsOf: async () => [],
     teamExists: async (organizationId, teamId) =>
       (
         await call(
