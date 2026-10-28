@@ -519,6 +519,7 @@ export async function place(
       agentCostMicroCents: 0,
       copilot,
       transcriptUnavailable: null,
+      copilotQuietReason: null,
     },
     line.number,
     to

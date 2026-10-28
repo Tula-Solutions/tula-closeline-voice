@@ -354,6 +354,89 @@ describe('GET /v1/calls/{callId}/copilot/stream', () => {
     expect(seen.find((f) => f.includes('copilot.card_updated'))).toContain('Book a pilot.')
   })
 
+  describe('the quiet reason', () => {
+    const quietOf = (seen: string[]) =>
+      seen
+        .filter((f) => f.includes('copilot.status'))
+        .map((f) => /"quietReason":(null|"[a-z_]+")/.exec(f)?.[1])
+    const moments = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        callId: formatId('call', crypto.randomUUID()),
+        dealRecordId: formatId('deal', crypto.randomUUID()),
+        score: 0.9 - i / 100,
+        prospect: `Too expensive ${i}`,
+        repNext: `Here is why ${i}`,
+      })) as never
+    const asked = async (prospect = [{ text: 'that costs too much', afterBytes: 100 }]) => {
+      const id = await placeScripted({ prospect })
+      speak(id, 'prospect')
+      await Transcript.settled(t.deps, id)
+      return id
+    }
+    const firstStatus = async (id: string) =>
+      quietOf(
+        await frames(await open(rep, id), (s) => s.some((f) => f.includes('copilot.status')))
+      )[0]
+
+    it('says not_enough_won_moments when the Organization has no won Moments', async () => {
+      expect(await firstStatus(await asked())).toBe('"not_enough_won_moments"')
+    })
+
+    it('says playbook_unavailable when the Moment search fails', async () => {
+      Object.assign(t.deps.evidence, {
+        searchMoments: async () => Promise.reject(new Error('down')),
+      })
+      expect(await firstStatus(await asked())).toBe('"playbook_unavailable"')
+    })
+
+    it('says playbook_unavailable when the Moment search times out', async () => {
+      t.deps.copilot.cardSearchTimeoutMs = 20
+      Object.assign(t.deps.evidence, { searchMoments: () => new Promise<never>(() => {}) })
+      expect(await firstStatus(await asked())).toBe('"playbook_unavailable"')
+    })
+
+    it('says below_minimum_evidence when Moments exist but fewer than the minimum', async () => {
+      t.deps.evidence.load(org, { moments: moments(2) })
+      expect(await firstStatus(await asked())).toBe('"below_minimum_evidence"')
+    })
+
+    it('sends a reason once per quiet spell, not on every turn', async () => {
+      const id = await placeScripted({
+        prospect: [
+          { text: 'that costs too much', afterBytes: 100 },
+          { text: 'still too much', afterBytes: 5_000 },
+        ],
+      })
+      t.deps.copilot.maxStreamMs = 300
+      const reading = frames(await open(rep, id), () => false)
+      speak(id, 'prospect')
+      speak(id, 'prospect')
+      expect(quietOf(await reading).filter((q) => q === '"not_enough_won_moments"')).toHaveLength(1)
+      expect(await t.deps.calls.get(org, id as never)).toMatchObject({
+        copilotQuietReason: 'not_enough_won_moments',
+      })
+    })
+
+    it('clears the reason when a card arrives after a quiet spell', async () => {
+      const id = await placeScripted({
+        prospect: [
+          { text: 'that costs too much', afterBytes: 100 },
+          { text: 'still too much', afterBytes: 5_000 },
+        ],
+      })
+      speak(id, 'prospect')
+      await Transcript.settled(t.deps, id)
+      const reading = frames(await open(rep, id), (s) => {
+        const q = quietOf(s)
+        return q.includes('"not_enough_won_moments"') && q.at(-1) === 'null'
+      })
+      t.deps.evidence.load(org, { moments: moments(3) })
+      speak(id, 'prospect')
+      expect(quietOf(await reading)).toEqual(['"not_enough_won_moments"', 'null'])
+      expect((await t.deps.copilotCards.list(org, id as never, 0, 10)).length).toBe(1)
+    })
+  })
+
   it('keeps the Call and its Transcript when the card search fails', async () => {
     Object.assign(t.deps, {
       evidence: {

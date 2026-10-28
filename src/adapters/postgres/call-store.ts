@@ -63,6 +63,7 @@ function toStored(row: Row): StoredCall {
     agentCostMicroCents: Number(row.agentCostMicroCents),
     copilot: row.copilot,
     transcriptUnavailable: row.transcriptUnavailable,
+    copilotQuietReason: row.copilotQuietReason,
   }
 }
 
@@ -409,6 +410,21 @@ export function createPostgresCallStore(db: Database): CallStore {
           .update(voiceCalls)
           .set({ providerCallSid, updatedAt: sql`now()` })
           .where(one(organizationId, id))
+      )
+    },
+
+    async setCopilotQuietReason(organizationId, id, copilotQuietReason) {
+      await withOrganization(db, organizationId, (tx) =>
+        tx
+          .update(voiceCalls)
+          .set({ copilotQuietReason, updatedAt: sql`now()` })
+          // Only a change writes: a quiet spell sets this once, not on every turn.
+          .where(
+            and(
+              one(organizationId, id),
+              sql`${voiceCalls.copilotQuietReason} is distinct from ${copilotQuietReason}`
+            )
+          )
       )
     },
 

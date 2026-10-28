@@ -151,7 +151,9 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
         const reason = call?.transcriptUnavailable ?? undefined
         const state =
           over || refused ? 'ended' : call.disclosure.playedAt ? 'live' : 'waiting_for_disclosure'
-        const status = `${state}|${reason ?? ''}`
+        // A dead Transcript explains the silence best; else the card search's own reason.
+        const quietReason = reason ? 'transcript_unavailable' : (call?.copilotQuietReason ?? null)
+        const status = `${state}|${quietReason ?? ''}`
         const turns = refused
           ? []
           : await container.callTurns.list(org, callId, cursor, MAX_TURN_PAGE)
@@ -162,7 +164,7 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
             data: {
               callId,
               state,
-              quietReason: reason ? 'transcript_unavailable' : null,
+              quietReason,
             },
           } as never)
         }

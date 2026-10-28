@@ -19,7 +19,15 @@ export type StoredCall = VoiceCall & {
   copilot: boolean
   /** Why the live Transcript stopped, or null while it has not; shared by every instance. */
   transcriptUnavailable: TranscriptUnavailableReason | null
+  /** Why the Copilot panel is quiet while the Transcript runs, or null once a card is shown. */
+  copilotQuietReason: CopilotQuietReason | null
 }
+
+/** Why a card search found nothing to show; the stream names it to the Rep. */
+export type CopilotQuietReason =
+  | 'not_enough_won_moments'
+  | 'below_minimum_evidence'
+  | 'playbook_unavailable'
 
 /** Why a Call's live Transcript stopped, as the stream names it. */
 export type TranscriptUnavailableReason = 'speech_to_text_failed' | 'stream_dropped'
@@ -209,6 +217,12 @@ export type CallStore = {
     organizationId: string,
     id: VoiceCall['id'],
     providerCallSid: string
+  ) => Promise<void>
+  /** Sets (or with null clears) why the Call's card panel is quiet; the Call itself is untouched. */
+  setCopilotQuietReason: (
+    organizationId: string,
+    id: VoiceCall['id'],
+    reason: CopilotQuietReason | null
   ) => Promise<void>
   /** Records that the live Transcript of a Call stopped; the Call itself is untouched. */
   markTranscriptUnavailable: (

@@ -26,13 +26,14 @@ import * as Calls from '~/modules/call/service'
 import type { Caller } from '~/modules/caller'
 import { forOrganization } from '~/modules/copilot-settings/service'
 import { eventRegistry } from '~/modules/recording/messages'
+import type { CopilotQuietReason } from '~/ports/call-store'
 import type { Composed } from '~/ports/copilot-card-store'
 import type { MomentMatch } from '~/ports/evidence-search'
 
 /** What the cards need from the container. */
 export type CardDeps = Pick<
   Container,
-  'copilotCards' | 'copilotSettings' | 'evidence' | 'copilot' | 'clock' | 'logger' | 'llm'
+  'calls' | 'copilotCards' | 'copilotSettings' | 'evidence' | 'copilot' | 'clock' | 'logger' | 'llm'
 >
 
 /** The least time between two cards on a Call, in milliseconds. */
@@ -72,6 +73,16 @@ async function room(deps: CardDeps, organizationId: string, callId: string) {
   // Moment's index; two Moments of one Call count as one. Add the index when the contract does.
   const shown = new Set(tally.recent.flatMap((card) => card.citedMoments.map((m) => m.callId)))
   return { open, shown }
+}
+
+/** Tells the Call's stream why the panel is quiet, or with null that it no longer is. */
+async function quiet(
+  deps: CardDeps,
+  organizationId: string,
+  callId: string,
+  reason: CopilotQuietReason | null
+) {
+  await deps.calls.setCopilotQuietReason(organizationId, callId as never, reason)
 }
 
 /** Runs a search under the card timeout; a late answer is ignored and never throws. */
@@ -203,7 +214,12 @@ export async function onProspectTurn(
       : undefined
     const found = await bounded(deps, (signal) =>
       deps.evidence.searchMoments(organizationId, window, SEARCH_LIMIT, signal)
-    )
+    ).catch(async (error) => {
+      if (!isStale()) {
+        await quiet(deps, organizationId, callId, 'playbook_unavailable')
+      }
+      throw error
+    })
     const passage = (await documents)?.items[0]
     if (isStale()) {
       return
@@ -218,11 +234,13 @@ export async function onProspectTurn(
       .slice(0, SEARCH_LIMIT)
     // The minimum is the Playbook's own count, over all the Moments it found, not the few shown.
     const minimum = await minimumEvidence(deps, organizationId)
-    if (
-      items.length === 0 ||
-      found.evidence.moments < minimum.moments ||
-      found.evidence.deals < minimum.deals
-    ) {
+    if (found.evidence.moments === 0) {
+      return await quiet(deps, organizationId, callId, 'not_enough_won_moments')
+    }
+    if (found.evidence.moments < minimum.moments || found.evidence.deals < minimum.deals) {
+      return await quiet(deps, organizationId, callId, 'below_minimum_evidence')
+    }
+    if (items.length === 0) {
       return
     }
     const card = {
@@ -262,6 +280,7 @@ export async function onProspectTurn(
       return
     }
     const appended = await deps.copilotCards.append(organizationId, callId, card)
+    await quiet(deps, organizationId, callId, null)
     if (appended.kind === 'similar_moment') {
       await compose(deps, organizationId, appended, items).catch((error) =>
         deps.logger.warn('cards.compose_skipped', {

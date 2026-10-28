@@ -66,6 +66,18 @@ describe('the Postgres Call store', () => {
     expect((await calls.get(org, call.id))?.transcriptUnavailable).toBe('speech_to_text_failed')
   })
 
+  test('sets and clears the Copilot quiet reason, for its own Organization only', async () => {
+    const org = newOrganization()
+    const call = await calls.insert(org, await callFor(org))
+    expect((await calls.get(org, call.id))?.copilotQuietReason).toBeNull()
+    await calls.setCopilotQuietReason(newOrganization(), call.id, 'playbook_unavailable')
+    expect((await calls.get(org, call.id))?.copilotQuietReason).toBeNull()
+    await calls.setCopilotQuietReason(org, call.id, 'below_minimum_evidence')
+    expect((await calls.get(org, call.id))?.copilotQuietReason).toBe('below_minimum_evidence')
+    await calls.setCopilotQuietReason(org, call.id, null)
+    expect((await calls.get(org, call.id))?.copilotQuietReason).toBeNull()
+  })
+
   test('fails stale outbound Calls by their state, for their own Organization only', async () => {
     const org = newOrganization()
     const other = newOrganization()

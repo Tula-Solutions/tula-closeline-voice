@@ -92,6 +92,7 @@ export function createMemoryCallStore(): MemoryCallStore {
         agentCostMicroCents: 0,
         copilot: input.copilot ?? false,
         transcriptUnavailable: null,
+        copilotQuietReason: null,
       }
       rows.set(call.id, {
         call,
@@ -131,6 +132,7 @@ export function createMemoryCallStore(): MemoryCallStore {
         agentCostMicroCents: 0,
         copilot: false,
         transcriptUnavailable: null,
+        copilotQuietReason: null,
       }
       rows.set(call.id, {
         call,
@@ -172,6 +174,7 @@ export function createMemoryCallStore(): MemoryCallStore {
         agentCostMicroCents: 0,
         copilot: false,
         transcriptUnavailable: null,
+        copilotQuietReason: null,
       }
       rows.set(call.id, {
         call,
@@ -310,6 +313,13 @@ export function createMemoryCallStore(): MemoryCallStore {
       const row = rowsOf(organizationId).get(id)
       if (row !== undefined) {
         row.call.providerCallSid = providerCallSid
+      }
+    },
+
+    async setCopilotQuietReason(organizationId, id, reason) {
+      const row = rowsOf(organizationId).get(id)
+      if (row !== undefined) {
+        row.call.copilotQuietReason = reason
       }
     },
 
