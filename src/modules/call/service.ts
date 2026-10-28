@@ -23,6 +23,7 @@ import type { Container } from '~/container'
 import { describeError } from '~/describe-error'
 import { domainError } from '~/http/domain-error'
 import type { Caller } from '~/modules/caller'
+import * as CopilotSettings from '~/modules/copilot-settings/service'
 import { type IdempotentAnswer, idempotent, requestHash } from '~/modules/idempotency/service'
 import * as Transcript from '~/modules/transcript/service'
 import { InvalidTransitionError, type StoredCall } from '~/ports/call-store'
@@ -36,6 +37,7 @@ export type CallDeps = Pick<
   | 'callTurns'
   | 'copilotCards'
   | 'llm'
+  | 'copilotSettings'
   | 'evidence'
   | 'transcribe'
   | 'copilot'
@@ -165,7 +167,7 @@ export async function withinDeadline<T>(
 }
 
 /** Why a provider failure ended the Call, as the contract names it. */
-function reasonOf(error: unknown): VoiceCallFailureReason {
+export function reasonOf(error: unknown): VoiceCallFailureReason {
   if (error instanceof TelephonyError) {
     if (error.code === TELEPHONY_ERROR_CODES.unavailable) {
       return 'timeout'
@@ -462,6 +464,10 @@ export async function place(
     throw domainError(ERRORS['auth.forbidden'])
   }
   const line = await lineFor(deps, caller, membershipId, request.lineId)
+  // An Organization with the Copilot off dials without it, recorded as such (stream: copilot.disabled).
+  const copilot =
+    (request.copilot ?? false) &&
+    (await CopilotSettings.forOrganization(deps, caller.organizationId)).enabled
 
   const answer = await deps.idempotency.withOrganization(caller.organizationId, (scope) =>
     idempotent(
@@ -484,7 +490,7 @@ export async function place(
             repMembershipId: membershipId,
             prospectId: request.prospectId ?? null,
             prospectNumber: to,
-            copilot: request.copilot ?? false,
+            copilot,
             idempotency: {
               key: new Bun.CryptoHasher('sha256')
                 .update(`${caller.userId}|${PLACE_CALL_ROUTE}|${idempotencyKey}`)
@@ -511,7 +517,7 @@ export async function place(
       ...answer.body.call,
       providerCallSid: null,
       agentCostMicroCents: 0,
-      copilot: request.copilot ?? false,
+      copilot,
       transcriptUnavailable: null,
     },
     line.number,

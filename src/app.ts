@@ -5,6 +5,7 @@ import { createBaseApp } from '~/http/base'
 import { createRouter } from '~/http/router'
 import { registerSecuritySchemes } from '~/http/security'
 import type { AppEnv } from '~/http/types'
+import { createAgentCallDialRouter } from '~/modules/agent-call-dial/router'
 import {
   createAgentCallInternalRouter,
   createAgentCallRouter,
@@ -12,6 +13,7 @@ import {
 import { createAgentSettingsRouter } from '~/modules/agent-settings/router'
 import { createCallRouter } from '~/modules/call/router'
 import { createCallTurnsRouter } from '~/modules/call-turns/router'
+import { createCopilotSettingsRouter } from '~/modules/copilot-settings/router'
 import { createHandoffRouter } from '~/modules/handoff/router'
 import { createHealthRouter } from '~/modules/health/router'
 import { createLineRouter } from '~/modules/line/router'
@@ -33,6 +35,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   // Trusted services call these with the shared secret (ADR 0013), not an access token.
   app.route('/', createCallTurnsRouter(container))
   app.route('/', createAgentCallInternalRouter(container))
+  app.route('/', createAgentCallDialRouter(container))
   app.route('/', createInternalRecordingRouter(container))
 
   // Everything under /v1 requires a verified access token.
@@ -40,6 +43,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   publicRoutes.use('*', authenticate(container))
   publicRoutes.route('/', createLineRouter(container))
   publicRoutes.route('/', createAgentSettingsRouter(container))
+  publicRoutes.route('/', createCopilotSettingsRouter(container))
   publicRoutes.route('/', createAgentCallRouter(container))
   publicRoutes.route('/', createSoftphoneRouter(container))
   publicRoutes.route('/', createCallRouter(container))

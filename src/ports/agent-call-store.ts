@@ -39,6 +39,41 @@ export type LineUsage = {
   oldestDialAt: Date | null
 }
 
+/** Whether a Line has no room for another dial: all slots open, or the daily cap spent. */
+export function lineIsFull(usage: LineUsage): boolean {
+  return (
+    usage.open >= usage.maxConcurrentAgentCalls ||
+    (usage.dials >= usage.dailyAgentDialCap && usage.oldestDialAt !== null)
+  )
+}
+
+/** What a dial claim needs: when, to which number, under which Call id, and the last Contact Check. */
+export type DialClaim = {
+  at: Date
+  numberHash: Uint8Array
+  /** The id of the voice Call the dial will create; stored on the row as it moves to `dialing`. */
+  callId: string
+  /** Start of the daily window the Line cap counts from. */
+  since: Date
+  /** Runs inside the claim, with the Line held; returns a settlement to refuse the dial. */
+  contactCheck: () => Promise<Settlement | undefined>
+}
+
+/** The outcome of {@link AgentCallStore.claimDial}. */
+export type ClaimOutcome =
+  | { kind: 'claimed'; call: StoredAgentCall }
+  | { kind: 'capped'; usage: LineUsage }
+  | { kind: 'refused'; settlement: Settlement }
+  | { kind: 'gone' }
+
+/** How a dialed Agent Call ended. */
+export type Finish = {
+  result: NonNullable<AgentCall['result']>
+  endReason: AgentCall['endReason']
+  durationSeconds: number | null
+  at: Date
+}
+
 /** Thrown by {@link AgentCallStore.insert} when the Prospect already has a queued, dialing or live Agent Call. */
 export class AgentCallOpenError extends Error {
   constructor(readonly agentCallId: string) {
@@ -86,4 +121,20 @@ export type AgentCallStore = {
     id: string,
     settlement: Settlement
   ) => Promise<StoredAgentCall | undefined>
+  /**
+   * Moves a queued row to `dialing` and stamps `dialedAt`, but only when, with the Line held for the
+   * duration, the Line caps still have room and the Contact Check still allows the dial. Two
+   * concurrent claims on one Line therefore cannot exceed a cap.
+   */
+  claimDial: (organizationId: string, id: string, claim: DialClaim) => Promise<ClaimOutcome>
+  /** Moves a dialing row to `live`; `undefined` when it is not dialing. */
+  markLive: (organizationId: string, id: string) => Promise<StoredAgentCall | undefined>
+  /** Ends a dialing or live row once; `undefined` when it already ended, so a replay changes nothing. */
+  finish: (
+    organizationId: string,
+    id: string,
+    finish: Finish
+  ) => Promise<StoredAgentCall | undefined>
+  /** The Agent Call that owns a voice Call. */
+  byCallId: (organizationId: string, callId: string) => Promise<StoredAgentCall | undefined>
 }

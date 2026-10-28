@@ -19,6 +19,7 @@ import {
   createMemoryQueue,
   createMemoryStreamingTranscribe,
   createMemoryTelephony,
+  createMemoryTts,
   createTestJwks,
   createTestKeyPair,
   type MemoryContactGuard,
@@ -27,6 +28,7 @@ import {
   type MemoryQueue,
   type MemoryStreamingTranscribe,
   type MemoryTelephony,
+  type MemoryTts,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
 import {
@@ -46,6 +48,7 @@ import {
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
 import { createMemoryCopilotCardStore } from '~/adapters/memory/copilot-card-store'
+import { createMemoryCopilotSettingsStore } from '~/adapters/memory/copilot-settings-store'
 import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
@@ -81,6 +84,7 @@ import { SERVICE } from '~/info'
 import { idle } from '~/modules/call/service'
 import { publishOnFinal } from '~/modules/recording/jobs'
 import {
+  type agentCallEndedMessage,
   type callEndedMessage,
   eventRegistry,
   type finishRecordingMessage,
@@ -143,7 +147,13 @@ export type TestDeps = Container & {
   callEvents: MemoryCallEventStore
   calls: MemoryCallStore
   storage: MemoryObjectStore
-  events: MemoryQueue<typeof callEndedMessage>
+  /** The Agent's voice: `tts` is scripted, `spoken` holds the audio chunks sent per Call id. */
+  agentAudio: {
+    tts: MemoryTts
+    sinkFor: (callId: string) => (chunk: { sequence: number }) => void
+    spoken: Map<string, number[]>
+  }
+  events: MemoryQueue<typeof callEndedMessage | typeof agentCallEndedMessage>
   jobs: MemoryQueue<typeof finishRecordingMessage>
   /** Every JSON log line written, in order. */
   logLines: string[]
@@ -173,7 +183,16 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     destination: { write: (line) => void logLines.push(line) },
   })
   const calls = publishOnFinal(createMemoryCallStore(), jobs, logger)
+  const spoken = new Map<string, number[]>()
+  const agentAudio = {
+    tts: createMemoryTts({ sleep: async () => undefined, random: () => 0 }),
+    sinkFor: (callId: string) => (chunk: { sequence: number }) => {
+      spoken.set(callId, [...(spoken.get(callId) ?? []), chunk.sequence])
+    },
+    spoken,
+  }
   return {
+    agentAudio,
     env: loadEnv({
       ENVIRONMENT: 'local',
       LOG_LEVEL: 'debug',
@@ -188,6 +207,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     prospects: createMemoryProspectDirectory(),
     contactGuard: createMemoryContactGuard(),
     agentSettings: createMemoryAgentSettingsStore(),
+    copilotSettings: createMemoryCopilotSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
     qualification: createMemoryQualificationStore(),
     booking: createMemoryBookingGateway(),

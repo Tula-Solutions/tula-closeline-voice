@@ -2,8 +2,6 @@ import {
   COPILOT_OBJECTION_TYPES,
   type CopilotCard,
   copilotCardSchema,
-  DEFAULT_COPILOT_MIN_DEALS,
-  DEFAULT_COPILOT_MIN_MOMENTS,
   formatId,
   MAX_COPILOT_CARD_TEXT_LENGTH,
   MAX_COPILOT_CARDS_PER_CALL,
@@ -12,13 +10,14 @@ import {
 } from 'tula-closeline-contract'
 import { z } from 'zod'
 import type { Container } from '~/container'
+import { forOrganization } from '~/modules/copilot-settings/service'
 import type { Composed } from '~/ports/copilot-card-store'
 import type { MomentMatch } from '~/ports/evidence-search'
 
 /** What the cards need from the container. */
 export type CardDeps = Pick<
   Container,
-  'copilotCards' | 'evidence' | 'copilot' | 'clock' | 'logger' | 'llm'
+  'copilotCards' | 'copilotSettings' | 'evidence' | 'copilot' | 'clock' | 'logger' | 'llm'
 >
 
 /** The least time between two cards on a Call, in milliseconds. */
@@ -36,10 +35,11 @@ const ASKS_FOR_DOCUMENT =
 
 /**
  * The least evidence a card needs: Moments and distinct won Deals. The one place that reads it, so
- * the Organization's Copilot settings replace it here and nowhere else.
+ * it comes from the Organization's Copilot settings, here and nowhere else.
  */
-async function minimumEvidence(_deps: CardDeps, _organizationId: string) {
-  return { moments: DEFAULT_COPILOT_MIN_MOMENTS, deals: DEFAULT_COPILOT_MIN_DEALS }
+async function minimumEvidence(deps: CardDeps, organizationId: string) {
+  const { minMoments, minDeals } = await forOrganization(deps, organizationId)
+  return { moments: minMoments, deals: minDeals }
 }
 
 /** Whether the throttle and the cap let a card be shown now, and which Moments were shown lately. */

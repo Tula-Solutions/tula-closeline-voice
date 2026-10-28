@@ -22,6 +22,8 @@ import {
   systemClock,
   type TelephonyPort,
   type TokenVerifier,
+  type TtsAudioChunk,
+  type TtsPort,
 } from 'tula-closeline-kit'
 import { createBedrockLlm, DEFAULT_BEDROCK_FAST_MODEL } from 'tula-closeline-kit/llm'
 import { createSqsQueue } from 'tula-closeline-kit/queue'
@@ -48,6 +50,7 @@ import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-sto
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
 import { createPostgresCopilotCardStore } from '~/adapters/postgres/copilot-card-store'
+import { createPostgresCopilotSettingsStore } from '~/adapters/postgres/copilot-settings-store'
 import { createPostgresHandoffStore } from '~/adapters/postgres/handoff-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
@@ -84,6 +87,7 @@ import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { CallTurnStore } from '~/ports/call-turn-store'
 import type { CopilotCardStore } from '~/ports/copilot-card-store'
+import type { CopilotSettingsStore } from '~/ports/copilot-settings-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { HandoffStore } from '~/ports/handoff-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
@@ -95,6 +99,13 @@ import type { QualificationQuestionStore } from '~/ports/qualification-question-
 import type { QualificationStore } from '~/ports/qualification-store'
 import type { RecordingStore } from '~/ports/recording-store'
 import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
+
+/** What an Agent speaks with: the text-to-speech engine and where a Call's audio goes. */
+export type AgentAudio = {
+  tts: TtsPort
+  /** The audio leg of one Call, which receives the Agent's speech in order. */
+  sinkFor: (callId: string) => (chunk: TtsAudioChunk) => void
+}
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
 export type ReadinessCheck = {
@@ -131,6 +142,8 @@ export type Container = {
   contactGuard: ContactGuard
   /** The Inbound Agent settings of every Organization, one row each. */
   agentSettings: AgentSettingsStore
+  /** The Copilot settings of every Organization, one row each. */
+  copilotSettings: CopilotSettingsStore
   /** The Qualification questions of every Organization, in the order the Agent asks them. */
   questions: QualificationQuestionStore
   /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
@@ -179,6 +192,11 @@ export type Container = {
   directory: OrganizationDirectory
   /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
   twilioPurge?: TwilioPurgeSource
+  /**
+   * The voice and the audio leg an Agent speaks through. Unset until a speech engine and the media
+   * stream are wired (phase 2): a dialed Agent Call then hangs up after its Disclosure.
+   */
+  agentAudio?: AgentAudio
   /** Releases the database connections; safe to call more than once. */
   close: () => Promise<void>
   /** Probes run by `/readyz`: the database. */
@@ -241,6 +259,7 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
     ...(env.TWILIO_REGION ? { region: env.TWILIO_REGION } : {}),
     environment: env.ENVIRONMENT,
     statusCallbackUrl: `${callbacks}/status`,
+    detectionCallbackUrl: `${callbacks}/detection`,
     recordingStatusCallbackUrl: `${callbacks}/recording`,
     store: createPostgresTwilioStore(database),
   })
@@ -424,6 +443,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
         : createUnconfiguredProspectDirectory(),
     contactGuard: createContactGuard(env, logger),
     agentSettings: createPostgresAgentSettingsStore(database.db),
+    copilotSettings: createPostgresCopilotSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
     handoffs: createPostgresHandoffStore(database.db),

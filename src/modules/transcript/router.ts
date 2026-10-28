@@ -111,7 +111,10 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
     const caller = callerOf(c)
     const { callId } = c.req.valid('param')
     const first = await Calls.get(container, caller, callId)
+    // The stored flag, so a Call dialed while the Organization had the Copilot off says so at once.
+    const stored = await container.calls.get(caller.organizationId, callId)
     if (
+      stored?.copilot === false ||
       first.repMembershipId === null ||
       (first.disclosure.playedAt && !first.disclosure.aiAssisted)
     ) {

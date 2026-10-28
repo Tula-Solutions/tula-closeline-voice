@@ -11,6 +11,7 @@ export type MediaDeps = Pick<
   | 'callTurns'
   | 'copilotCards'
   | 'llm'
+  | 'copilotSettings'
   | 'evidence'
   | 'telephony'
   | 'transcribe'

@@ -198,6 +198,24 @@ describe('the Postgres Call store', () => {
     expect((await calls.events(org, first.call.id)).map((e) => e.kind)).toEqual(['state_changed'])
   })
 
+  test('an Agent outbound insert is once per id and has no Rep', async () => {
+    const org = newOrganization()
+    const base = await callFor(org)
+    const input = {
+      id: formatId('call', crypto.randomUUID()),
+      lineId: base.lineId,
+      prospectId: formatId('prs', crypto.randomUUID()),
+      prospectNumber: '+14155550123',
+      createdAt: T0,
+    }
+    const first = await calls.insertAgentOutbound(org, input)
+    const again = await calls.insertAgentOutbound(org, input)
+    expect([first.created, again.created]).toEqual([true, false])
+    expect(again.call.id).toBe(first.call.id)
+    expect(first.call).toMatchObject({ direction: 'outbound', state: 'ringing' })
+    expect(first.call.repMembershipId).toBeNull()
+  })
+
   test('of many simultaneous claims of an inbound Call exactly one wins', async () => {
     const org = newOrganization()
     const base = await callFor(org)
