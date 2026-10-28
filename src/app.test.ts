@@ -21,6 +21,7 @@ test('the app serves its OpenAPI document describing every route and the error b
   expect(document.info.title).toBe(SERVICE)
   expect(Object.keys(document.paths).sort()).toEqual([
     '/healthz',
+    '/internal/v1/calls/{callId}/recording',
     '/internal/v1/calls/{callId}/turns',
     '/readyz',
     '/v1/agent/question-order',
@@ -30,6 +31,7 @@ test('the app serves its OpenAPI document describing every route and the error b
     '/v1/calls',
     '/v1/calls/{callId}',
     '/v1/calls/{callId}/answer',
+    '/v1/calls/{callId}/recording',
     '/v1/calls/{callId}/wrap-up',
     '/v1/lines',
     '/v1/lines/{lineId}',

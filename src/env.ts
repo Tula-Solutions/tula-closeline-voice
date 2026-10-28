@@ -14,6 +14,7 @@ const LOCAL_DEFAULTS = {
   AUTH_AUDIENCE: 'closeline',
   AWS_REGION: 'us-east-1',
   TELEPHONY_PROVIDER: 'memory',
+  PHONE_HASH_KEY: 'local-phone-hash-key-not-for-deploys-0123456789',
 } as const
 
 /** The vendor prices a `local` run falls back to, in micro-cents (one millionth of a cent). */
@@ -47,7 +48,9 @@ const REQUIRED_OUTSIDE_LOCAL = [
   'AUTH_AUDIENCE',
   'AWS_REGION',
   'QUEUE_URL',
+  'JOBS_QUEUE_URL',
   'STORAGE_BUCKET',
+  'PHONE_HASH_KEY',
   'TELEPHONY_PROVIDER',
   'CORE_INTERNAL_URL',
   'CORE_INTERNAL_TOKEN',
@@ -103,6 +106,13 @@ const schema = z
     QUEUE_URL: z.url().max(2_048).optional(),
     /** Where ElasticMQ listens, for a local run against it. Accepted only when `local`. */
     QUEUE_ENDPOINT: z.url().max(2_048).optional(),
+    /** The queue of voice's own jobs (finishing a Recording). Required outside `local`. */
+    JOBS_QUEUE_URL: z.url().max(2_048).optional(),
+    /**
+     * The secret that hashes a Prospect's phone number for `voice.call.ended`. A credential: never
+     * log it. Required outside `local`.
+     */
+    PHONE_HASH_KEY: z.string().min(32).max(512).optional(),
     /** The bucket holding Call recordings. Required outside `local`. */
     STORAGE_BUCKET: z
       .string()
@@ -185,6 +195,16 @@ const schema = z
     MISSED_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1_000).max(600_000).default(5_000),
     /** The most Organizations one missed-Call sweep visits; the next run takes the rest. */
     MISSED_SWEEP_MAX_ORGANIZATIONS: z.coerce.number().int().min(1).max(10_000).default(200),
+    /** How long a deleted Recording's file is kept before it is removed, in ms (default 24 hours). */
+    RECORDING_PURGE_DELAY_MS: z.coerce.number().int().min(0).max(2_592_000_000).default(86_400_000),
+    /** How often, on average, each instance removes the files of deleted Recordings (jittered 20%). */
+    RECORDING_PURGE_INTERVAL_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(60_000),
+    /** The most Organizations one Recording purge run visits; the next run takes the rest. */
+    RECORDING_PURGE_MAX_ORGANIZATIONS: z.coerce.number().int().min(1).max(10_000).default(200),
+    /** How often, on average, each instance polls the jobs queue (jittered 20%). */
+    RECORDING_JOBS_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(2_000),
+    /** The largest Recording voice will copy, in bytes; a bigger file fails the job. */
+    RECORDING_MAX_BYTES: z.coerce.number().int().min(1).max(2_147_483_648).default(536_870_912),
     /** Vendor price of speech-to-text per second of audio, in micro-cents. Required outside `local`. */
     STT_PRICE_MICRO_CENTS_PER_SECOND: priceSchema.optional(),
     /** Vendor price of text-to-speech per character spoken, in micro-cents. Required outside `local`. */
@@ -365,6 +385,7 @@ const schema = z
       AUTH_ISSUER: need(env.AUTH_ISSUER, LOCAL_DEFAULTS.AUTH_ISSUER),
       AUTH_AUDIENCE: need(env.AUTH_AUDIENCE, LOCAL_DEFAULTS.AUTH_AUDIENCE),
       AWS_REGION: need(env.AWS_REGION, LOCAL_DEFAULTS.AWS_REGION),
+      PHONE_HASH_KEY: need(env.PHONE_HASH_KEY, LOCAL_DEFAULTS.PHONE_HASH_KEY),
       TELEPHONY_PROVIDER: need<'memory' | 'twilio'>(
         env.TELEPHONY_PROVIDER,
         LOCAL_DEFAULTS.TELEPHONY_PROVIDER

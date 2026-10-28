@@ -2,20 +2,31 @@ import { sql } from 'drizzle-orm'
 import type { RequestId } from 'tula-closeline-contract'
 import { createDb, type Database } from 'tula-closeline-db'
 import {
+  type AnyDefinition,
   type Clock,
   createLogger,
   createRemoteKeySet,
   createTokenVerifier,
   createTwilioTelephony,
+  type EnvelopeOf,
   type LlmPort,
   type LogDestination,
   type Logger,
+  type MessageRegistry,
+  type ObjectStore,
+  type Queue,
   systemClock,
   type TelephonyPort,
   type TokenVerifier,
 } from 'tula-closeline-kit'
 import { createBedrockLlm } from 'tula-closeline-kit/llm'
-import { createMemoryTelephony } from 'tula-closeline-kit/testing'
+import { createSqsQueue } from 'tula-closeline-kit/queue'
+import { createS3ObjectStore } from 'tula-closeline-kit/storage'
+import {
+  createMemoryObjectStore,
+  createMemoryQueue,
+  createMemoryTelephony,
+} from 'tula-closeline-kit/testing'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
@@ -28,6 +39,7 @@ import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import { createPostgresQualificationQuestionStore } from '~/adapters/postgres/qualification-question-store'
+import { createPostgresRecordingStore } from '~/adapters/postgres/recording-store'
 import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
 import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import {
@@ -38,6 +50,13 @@ import {
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { publishOnFinal } from '~/modules/recording/jobs'
+import {
+  type EventEnvelope,
+  eventRegistry,
+  type JobEnvelope,
+  jobRegistry,
+} from '~/modules/recording/messages'
 import type { AgentSettingsStore } from '~/ports/agent-settings-store'
 import type { AgentTurnStore } from '~/ports/agent-turn-store'
 import type { CallEventStore } from '~/ports/call-event-store'
@@ -48,6 +67,7 @@ import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 import type { QualificationQuestionStore } from '~/ports/qualification-question-store'
+import type { RecordingStore } from '~/ports/recording-store'
 import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
@@ -99,6 +119,14 @@ export type Container = {
   callEvents: CallEventStore
   /** Placed Calls, their state and their log; the only way a module reaches `voice.calls`. */
   calls: CallStore
+  /** Each Call's Recording row: where its copy is and when its file may be removed. */
+  recordings: RecordingStore
+  /** Region object storage, where Recording files are kept. */
+  storage: ObjectStore
+  /** The events queue other services consume; `voice.call.ended` goes out on it. */
+  events: Queue<EventEnvelope>
+  /** Our own jobs queue: finishing a Call's Recording and its event. */
+  jobs: Queue<JobEnvelope>
   /** Teams and Reps of an Organization, held by the core service. */
   directory: OrganizationDirectory
   /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
@@ -203,6 +231,38 @@ function createEvidenceSearch(env: Env): EvidenceSearch {
     : createUnconfiguredEvidenceSearch()
 }
 
+/** Picks a queue: SQS when its URL is set, in memory only for an unconfigured local run. */
+function createQueue<const D extends AnyDefinition>(
+  env: Env,
+  queueUrl: string | undefined,
+  registry: MessageRegistry<D>
+): Queue<EnvelopeOf<D>> {
+  if (queueUrl) {
+    return createSqsQueue({
+      queueUrl,
+      region: env.AWS_REGION,
+      environment: env.ENVIRONMENT,
+      registry,
+      ...(env.QUEUE_ENDPOINT === undefined ? {} : { endpoint: env.QUEUE_ENDPOINT }),
+    })
+  }
+  // The env schema requires the URLs outside `local`, so only a local run gets here.
+  return createMemoryQueue({ registry, clock: systemClock })
+}
+
+/** Picks object storage: S3 when a bucket is set, in memory only for an unconfigured local run. */
+function createStorage(env: Env): ObjectStore {
+  if (env.STORAGE_BUCKET) {
+    return createS3ObjectStore({
+      bucket: env.STORAGE_BUCKET,
+      region: env.AWS_REGION,
+      environment: env.ENVIRONMENT,
+      ...(env.STORAGE_ENDPOINT === undefined ? {} : { endpoint: env.STORAGE_ENDPOINT }),
+    })
+  }
+  return createMemoryObjectStore()
+}
+
 /** Options for {@link createContainer}. */
 export type ContainerOptions = {
   /** Where log lines go; defaults to stdout. */
@@ -224,6 +284,8 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     clock: systemClock,
     logger,
   })
+
+  const jobs = createQueue(env, env.JOBS_QUEUE_URL, jobRegistry)
 
   return {
     env,
@@ -253,7 +315,12 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: createTelephony(env, database.db),
     callEvents: createPostgresCallEventStore(database.db),
-    calls: createPostgresCallStore(database.db),
+    // Every Call that reaches a final state queues its finishing job (see publishOnFinal).
+    calls: publishOnFinal(createPostgresCallStore(database.db), jobs, logger),
+    recordings: createPostgresRecordingStore(database.db),
+    storage: createStorage(env),
+    events: createQueue(env, env.QUEUE_URL, eventRegistry),
+    jobs,
     // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
     // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).
     directory: createDirectory(env),

@@ -185,6 +185,13 @@ describe('POST /webhooks/twilio/recording', () => {
     expect(t.deps.callEvents.recorded).toHaveLength(1)
   })
 
+  test('a completed recording queues a finishing job, an in-progress one does not', async () => {
+    expect((await send(recording('in-progress'))).status).toBe(200)
+    expect(t.deps.jobs.depth().visible).toBe(0)
+    expect((await send(recording('completed'))).status).toBe(200)
+    expect(t.deps.jobs.depth().visible).toBe(1)
+  })
+
   test('an in-progress recording is acknowledged without a record', async () => {
     expect((await send(recording('in-progress'))).status).toBe(200)
     expect(t.deps.callEvents.recorded).toHaveLength(0)
