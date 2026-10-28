@@ -31,6 +31,7 @@ import type { StoredLine } from '~/ports/line-store'
 export type CallDeps = Pick<
   Container,
   | 'calls'
+  | 'recordings'
   | 'callTurns'
   | 'transcribe'
   | 'copilot'
@@ -421,7 +422,8 @@ export async function get(deps: CallDeps, caller: Caller, id: VoiceCall['id']): 
   ) {
     throw domainError(SALES_HISTORY_ERRORS['call.not_found'])
   }
-  return toCall(stored)
+  const row = await deps.recordings.get(caller.organizationId, id)
+  return { ...toCall(stored), recordingState: row?.state ?? 'none' }
 }
 
 /** Lists the Calls the caller may see, newest first, one cursor-paginated page at a time. */
@@ -446,8 +448,15 @@ export async function list(deps: CallDeps, caller: Caller, query: ListVoiceCalls
   })
   const page = rows.slice(0, query.limit)
   const last = page.at(-1)
+  const states =
+    page.length === 0
+      ? new Map()
+      : await deps.recordings.states(
+          caller.organizationId,
+          page.map((c) => c.id)
+        )
   return {
-    items: page.map(toCall),
+    items: page.map((c) => ({ ...toCall(c), recordingState: states.get(c.id) ?? 'none' })),
     nextCursor:
       rows.length > query.limit && last
         ? encodeCursor({ createdAt: last.createdAt, id: last.id })

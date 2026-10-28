@@ -3,6 +3,8 @@ import { createContainer } from '~/container'
 import { serveOptions } from '~/http/serve'
 import { startMissedSweep } from '~/modules/call/missed-sweep'
 import { startTwilioPurgeSchedule } from '~/modules/purge/start'
+import { startRecordingJobs } from '~/modules/recording/jobs'
+import { startRecordingPurge } from '~/modules/recording/purge'
 import { shutdown } from '~/shutdown'
 
 const container = createContainer()
@@ -12,6 +14,9 @@ const server = Bun.serve(serveOptions(container, app))
 const purgeSchedule = startTwilioPurgeSchedule(container)
 // The ring timeout of an inbound Call is a database sweep, so any instance may miss any Call.
 const missedSweep = startMissedSweep(container)
+// Finishing a Call's Recording and the purge of deleted ones are queue and database work too.
+const recordingJobs = startRecordingJobs(container)
+const recordingPurge = startRecordingPurge(container)
 
 container.logger.info('listening', { port: server.port, environment: container.env.ENVIRONMENT })
 
@@ -30,7 +35,12 @@ function stop(signal: string): void {
         process.exit(code)
       }
       // The purge run in flight finishes before its database connections are released.
-      Promise.all([purgeSchedule?.stop(), missedSweep.stop()])
+      Promise.all([
+        purgeSchedule?.stop(),
+        missedSweep.stop(),
+        recordingJobs.stop(),
+        recordingPurge.stop(),
+      ])
         .then(() => container.close())
         .then(
           () => process.exit(0),

@@ -5,10 +5,14 @@ import type { Container } from '~/container'
 import { domainError } from '~/http/domain-error'
 import type { CallDeps } from '~/modules/call/service'
 import * as Calls from '~/modules/call/service'
+import { enqueueFinish } from '~/modules/recording/jobs'
 import { mapRecordingCallback, mapStatusCallback } from './mapping'
 
 /** What the webhook service needs from the container. */
-export type WebhookDeps = Pick<Container, 'telephony' | 'callEvents' | 'clock' | 'logger' | 'env'> &
+export type WebhookDeps = Pick<
+  Container,
+  'telephony' | 'callEvents' | 'clock' | 'logger' | 'env' | 'jobs'
+> &
   CallDeps
 
 /** Which of the provider's callbacks arrived. */
@@ -132,6 +136,12 @@ export async function receive(
   })
   if (result === 'unknown_call') {
     throw domainError(VOICE_ERRORS['call.provider_call_not_found'])
+  }
+  const recordingSid = form.get('RecordingSid')
+  if (kind === 'recording' && recordingSid) {
+    // Also on a repeat: the first delivery may have logged the event and then failed to queue the
+    // job, and the job is safe to run twice. A failure here is a 500 so the provider retries.
+    await enqueueFinish(deps.jobs, query.data.organizationId, query.data.callId, recordingSid)
   }
   return result
 }

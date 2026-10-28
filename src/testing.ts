@@ -12,11 +12,15 @@ import {
 } from 'tula-closeline-kit'
 import {
   createMemoryLlm,
+  createMemoryObjectStore,
+  createMemoryQueue,
   createMemoryStreamingTranscribe,
   createMemoryTelephony,
   createTestJwks,
   createTestKeyPair,
   type MemoryLlm,
+  type MemoryObjectStore,
+  type MemoryQueue,
   type MemoryStreamingTranscribe,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
@@ -55,10 +59,18 @@ import {
   createMemoryQualificationStore,
   type MemoryQualificationStore,
 } from '~/adapters/memory/qualification-store'
+import { createMemoryRecordingStore } from '~/adapters/memory/recording-store'
 import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
 import { loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { publishOnFinal } from '~/modules/recording/jobs'
+import {
+  type callEndedMessage,
+  eventRegistry,
+  type finishRecordingMessage,
+  jobRegistry,
+} from '~/modules/recording/messages'
 import { createCopilotRuntime } from '~/modules/transcript/runtime'
 import { NUMBER_PROVISIONER_TIMEOUT_MS } from '~/ports/number-provisioner'
 
@@ -71,6 +83,8 @@ const DEPLOYED_ENV: Readonly<Record<string, string>> = {
   AUTH_AUDIENCE: 'closeline',
   AWS_REGION: 'us-east-1',
   QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/voice',
+  JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/voice-jobs',
+  PHONE_HASH_KEY: 'phone-hash-key-0123456789-abcdefghijklmnop',
   STORAGE_BUCKET: 'closeline-voice-test',
   CORE_INTERNAL_URL: 'https://core.test',
   CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
@@ -110,6 +124,9 @@ export type TestDeps = Container & {
   booking: MemoryBookingGateway
   callEvents: MemoryCallEventStore
   calls: MemoryCallStore
+  storage: MemoryObjectStore
+  events: MemoryQueue<typeof callEndedMessage>
+  jobs: MemoryQueue<typeof finishRecordingMessage>
   /** Every JSON log line written, in order. */
   logLines: string[]
   /** Every call to `reportError`, in order. */
@@ -130,7 +147,14 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
   const logLines: string[] = []
   const reported: TestDeps['reported'] = []
 
-  const calls = createMemoryCallStore()
+  const clock = createFixedClock('2026-01-01T00:00:00Z')
+  const jobs = createMemoryQueue({ registry: jobRegistry, clock })
+  const logger = createLogger({
+    service: SERVICE,
+    level: 'debug',
+    destination: { write: (line) => void logLines.push(line) },
+  })
+  const calls = publishOnFinal(createMemoryCallStore(), jobs, logger)
   return {
     env: loadEnv({
       ENVIRONMENT: 'local',
@@ -138,12 +162,8 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
       ...(overrides.env?.ENVIRONMENT && overrides.env.ENVIRONMENT !== 'local' ? DEPLOYED_ENV : {}),
       ...overrides.env,
     }),
-    logger: createLogger({
-      service: SERVICE,
-      level: 'debug',
-      destination: { write: (line) => void logLines.push(line) },
-    }),
-    clock: createFixedClock('2026-01-01T00:00:00Z'),
+    logger,
+    clock,
     tokenVerifier: overrides.tokenVerifier ?? REJECTING_VERIFIER,
     lines: createMemoryLineStore(),
     agentSettings: createMemoryAgentSettingsStore(),
@@ -164,6 +184,10 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     telephony: overrides.telephony ?? createMemoryTelephony(),
     callEvents: createMemoryCallEventStore(),
     calls,
+    recordings: createMemoryRecordingStore(),
+    storage: createMemoryObjectStore({ clock }),
+    events: createMemoryQueue({ registry: eventRegistry, clock }),
+    jobs,
     callTurns: createMemoryCallTurnStore(),
     transcribe: createMemoryStreamingTranscribe({ sleep: async () => undefined, random: () => 0 }),
     copilot: createCopilotRuntime(5),
@@ -215,6 +239,8 @@ export async function createTestApp(overrides: TestDepsOverrides = {}): Promise<
   })
   // Tokens are minted and verified at the same instant, whatever the test advances the clock to.
   deps.clock = clock
+  // Presigned URLs expire by the clock the test advances.
+  deps.storage = createMemoryObjectStore({ clock })
   const app = createApp(deps) as unknown as Hono<never>
 
   const bearer: TestApp['bearer'] = async (identity) => ({

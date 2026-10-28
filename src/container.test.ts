@@ -127,6 +127,8 @@ const DEPLOYED_SOURCE = {
   AWS_REGION: 'us-east-1',
   QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/voice-events',
   STORAGE_BUCKET: 'closeline-voice-recordings',
+  JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/voice-jobs',
+  PHONE_HASH_KEY: 'phone-hash-key-0123456789-abcdefghijklmnop',
   CORE_INTERNAL_URL: 'https://core.internal',
   CORE_INTERNAL_TOKEN: 'core-internal-token-0123456789',
   INTERNAL_API_TOKENS: 'voice-internal-token-0123456789-abcdefgh',

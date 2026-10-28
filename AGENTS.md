@@ -81,6 +81,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   `active` has no Membership). Memory adapters are in `src/adapters/memory/`;
   `src/adapters/unconfigured/` fails closed with `server.unavailable` until the Twilio number
   adapter exists.
+- `src/modules/recording/` copies a Call's Recording and announces the Call. A final Call state (wrapped by `publishOnFinal`) and a completed recording callback queue a `voice.recording_finish` job on `JOBS_QUEUE_URL`; `runJobs` (scheduled from `server.ts`) runs `finish`, which streams the Recording from the provider into the object store at `recordings/<callId>.wav` (size capped by `RECORDING_MAX_BYTES`), publishes `voice.call.ended` on `QUEUE_URL` with an id derived from the Call id (so a redelivery repeats the same id), then marks the row `stored` and deletes the provider's copy. `GET/DELETE /v1/calls/{id}/recording`: a 300 s signed URL for the caller's visible Calls; delete is Owner/Admin and schedules the file `RECORDING_PURGE_DELAY_MS` out, `purgeRecordings` removes it (via `voice.orgs_with_due_recordings`) and keeps a tombstone row. `GET /internal/v1/calls/{id}/recording` streams the file (shared secret plus `X-Organization-Id`). `PHONE_HASH_KEY` makes the event's `prospectPhoneHash`. Limits: no outbox for the enqueue, no consumer dedupe, no event if the recording callback never arrives.
 - `src/modules/webhook/` receives Twilio status and recording callbacks (unauthenticated, verified by
   `X-Twilio-Signature` over `WEBHOOK_BASE_URL` + path; bad signature is 403 and changes nothing;
   `CallEventStore` appends one `provider_callback` row per event id, duplicates change nothing).
@@ -105,7 +106,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 `ENVIRONMENT` (required, no default), `PORT`, `LOG_LEVEL`, `READINESS_TIMEOUT_MS`,
 `SHUTDOWN_TIMEOUT_MS`, `SHUTDOWN_GRACE_MS`, `MAX_REQUEST_BODY_BYTES`, and the deployment keys
 `REGION`, `DATABASE_URL`, `AUTH_JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AWS_REGION`,
-`QUEUE_URL`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`), and with `twilio` the keys
+`QUEUE_URL`, `JOBS_QUEUE_URL`, `PHONE_HASH_KEY`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`), and with `twilio` the keys
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
 `TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local), `ASSEMBLYAI_API_KEY` (optional; live speech-to-text),
 `BOOKING_LINK_TOKENS` (a JSON map of Organization id to the token of its Booking Type link, a credential never logged; unset means no booking over HTTP, a shortcut until Agent settings carry the link), `PLAYBOOK_INTERNAL_URL` and `PLAYBOOK_INTERNAL_TOKEN` (the Playbook's origin and internal secret; same rules as the core pair), `CORE_INTERNAL_URL` and `CORE_INTERNAL_TOKEN` (core's origin and the `Authorization: Bearer` secret

@@ -11,6 +11,7 @@ import { createCallTurnsRouter } from '~/modules/call-turns/router'
 import { createHandoffRouter } from '~/modules/handoff/router'
 import { createHealthRouter } from '~/modules/health/router'
 import { createLineRouter } from '~/modules/line/router'
+import { createInternalRecordingRouter, createRecordingRouter } from '~/modules/recording/router'
 import { createSoftphoneRouter } from '~/modules/softphone/router'
 import { createTranscriptRouter } from '~/modules/transcript/router'
 import { createWebhookRouter } from '~/modules/webhook/router'
@@ -27,6 +28,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
 
   // Trusted services call these with the shared secret (ADR 0013), not an access token.
   app.route('/', createCallTurnsRouter(container))
+  app.route('/', createInternalRecordingRouter(container))
 
   // Everything under /v1 requires a verified access token.
   const publicRoutes = createRouter<AuthedEnv>()
@@ -35,6 +37,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   publicRoutes.route('/', createAgentSettingsRouter(container))
   publicRoutes.route('/', createSoftphoneRouter(container))
   publicRoutes.route('/', createCallRouter(container))
+  publicRoutes.route('/', createRecordingRouter(container))
   publicRoutes.route('/', createTranscriptRouter(container))
   publicRoutes.route('/', createHandoffRouter(container))
   app.route('/v1', publicRoutes)
