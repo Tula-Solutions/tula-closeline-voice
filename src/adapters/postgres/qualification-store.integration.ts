@@ -54,6 +54,17 @@ async function seed(org: OrganizationId) {
 }
 
 describe('the Postgres Qualification store', () => {
+  test("details give the Prospect and the summary, and only to the Inquiry's Organization", async () => {
+    const org = newOrganization()
+    const { inquiryId } = await seed(org)
+    expect((await store.details(org, inquiryId))?.summary).toBeNull()
+    await store.setSummary(org, inquiryId, 'Wants ten seats.')
+    const details = await store.details(org, inquiryId)
+    expect(details?.summary).toBe('Wants ten seats.')
+    expect(details?.prospectId.startsWith('prs_')).toBe(true)
+    expect(await store.details(newOrganization(), inquiryId)).toBeUndefined()
+  })
+
   test('finds the Inquiry of a Call and records answers, replacing one to the same question', async () => {
     const org = newOrganization()
     const { callId, inquiryId } = await seed(org)
