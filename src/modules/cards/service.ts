@@ -14,6 +14,7 @@ import {
   MAX_COPILOT_CARDS_PER_CALL,
   MAX_COPILOT_CITED_MOMENTS,
   type MarkCopilotCardRequest,
+  membershipIdSchema,
   SALES_HISTORY_ERRORS,
   type SearchTurn,
   type VoiceCall,
@@ -311,8 +312,8 @@ export async function list(
 
 /**
  * Sets a card's rating, dismissal or pin to the end state asked. Only the Rep who took the Call may
- * mark it; for anyone else the Call is `call.not_found`. A repeat changes nothing and publishes no
- * second `voice.copilot.card_rated` event.
+ * mark it; for anyone else the Call is `call.not_found`. A repeat changes nothing and sends the same
+ * `voice.copilot.card_rated` event id again, so a retry after a failed publish delivers it.
  */
 export async function mark(
   deps: CardRouteDeps,
@@ -330,28 +331,30 @@ export async function mark(
   if (result === undefined) {
     throw domainError(COPILOT_ERRORS['card.not_found'])
   }
-  const { card } = result
-  if (result.changed) {
-    const ratedAt = deps.clock.now()
-    await deps.events.publish(
-      eventRegistry.create({
-        type: 'voice.copilot.card_rated',
-        id: `evt_${crypto.randomUUID().replaceAll('-', '')}`,
-        traceId: callId,
-        organizationId: caller.organizationId,
-        occurredAt: ratedAt,
-        payload: {
-          callId,
-          cardId: card.id,
-          repMembershipId: own as never,
-          kind: card.kind,
-          rating: card.rating,
-          dismissed: card.dismissed,
-          pinned: card.pinned,
-          ratedAt: ratedAt.toISOString(),
-        },
-      })
-    )
-  }
+  const { card, updatedAt } = result
+  // The id comes from the card and its last change, so a retry after a failed publish (or a repeat
+  // of the same body) sends the same event and consumers dedupe on it; a later change gets a new id.
+  const hash = new Bun.CryptoHasher('sha256')
+    .update(`voice.copilot.card_rated:${card.id}:${updatedAt.toISOString()}`)
+    .digest('hex')
+  await deps.events.publish(
+    eventRegistry.create({
+      type: 'voice.copilot.card_rated',
+      id: `evt_${hash.slice(0, 32)}`,
+      traceId: callId,
+      organizationId: caller.organizationId,
+      occurredAt: updatedAt,
+      payload: {
+        callId,
+        cardId: card.id,
+        repMembershipId: membershipIdSchema.parse(own),
+        kind: card.kind,
+        rating: card.rating,
+        dismissed: card.dismissed,
+        pinned: card.pinned,
+        ratedAt: updatedAt.toISOString(),
+      },
+    })
+  )
   return card
 }

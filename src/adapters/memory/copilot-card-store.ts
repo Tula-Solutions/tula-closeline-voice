@@ -4,6 +4,7 @@ import { type CopilotCardStore, MAX_CARD_PAGE, marked } from '~/ports/copilot-ca
 /** An in-memory {@link CopilotCardStore} for tests and local runs. */
 export function createMemoryCopilotCardStore(): CopilotCardStore {
   const byCall = new Map<string, CopilotCard[]>()
+  const updatedAt = new Map<string, Date>()
   const keyOf = (organizationId: string, callId: string) => `${organizationId}\u0000${callId}`
   return {
     async append(organizationId, callId, card) {
@@ -48,10 +49,11 @@ export function createMemoryCopilotCardStore(): CopilotCardStore {
       }
       const next = { ...old, ...marked(old, mark) } as CopilotCard
       cards[at] = next
-      return {
-        card: structuredClone(next),
-        changed: JSON.stringify(next) !== JSON.stringify(old),
+      const changed = JSON.stringify(next) !== JSON.stringify(old)
+      if (changed || !updatedAt.has(cardId)) {
+        updatedAt.set(cardId, new Date())
       }
+      return { card: structuredClone(next), changed, updatedAt: updatedAt.get(cardId) as Date }
     },
     async list(organizationId, callId, afterSequence, limit, kind) {
       const size = Math.min(Math.max(limit, 1), MAX_CARD_PAGE)

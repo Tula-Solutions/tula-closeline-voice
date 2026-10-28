@@ -126,14 +126,22 @@ export function createPostgresCopilotCardStore(db: Database): CopilotCardStore {
           next.dismissed === row.dismissed &&
           next.pinned === row.pinned
         ) {
-          return { card: toCard(row), changed: false }
+          return { card: toCard(row), changed: false, updatedAt: row.updatedAt }
         }
         const [updated] = await tx
           .update(voiceCopilotCards)
-          .set(next)
-          .where(eq(voiceCopilotCards.id, cardId))
+          .set({ ...next, updatedAt: new Date() })
+          .where(
+            and(
+              eq(voiceCopilotCards.organizationId, organizationId),
+              eq(voiceCopilotCards.callId, callId),
+              eq(voiceCopilotCards.id, cardId)
+            )
+          )
           .returning()
-        return updated === undefined ? undefined : { card: toCard(updated), changed: true }
+        return updated === undefined
+          ? undefined
+          : { card: toCard(updated), changed: true, updatedAt: updated.updatedAt }
       })
     },
     async list(organizationId, callId, afterSequence, limit, kind) {

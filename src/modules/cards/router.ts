@@ -49,8 +49,8 @@ const markRoute = createRoute({
   summary: 'Rate, dismiss or pin a Copilot Card',
   description:
     'Only the Rep who took the Call; for anyone else the Call is call.not_found. The body names ' +
-    'the end state wanted, so a repeat answers 200 with the card unchanged and publishes no ' +
-    'second voice.copilot.card_rated event. Dismissing clears the pin and pinning clears the dismissal.',
+    'the end state wanted, so a repeat answers 200 with the card unchanged and sends the same ' +
+    'voice.copilot.card_rated event id again, so consumers dedupe on it. Dismissing clears the pin and pinning clears the dismissal.',
   security,
   request: {
     params: copilotCardParamsSchema,

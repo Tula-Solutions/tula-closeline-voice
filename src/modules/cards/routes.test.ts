@@ -122,16 +122,37 @@ describe('PATCH /v1/calls/{callId}/copilot/cards/{cardId}', () => {
     }
   }
 
-  it('rates a card, and a repeat answers the same card and publishes no second event', async () => {
+  it('rates a card, and a repeat answers the same card and sends the same event id', async () => {
     const card = await seedCard(org, callId)
     const first = await patch(rep, card.id, { rating: 'useful' })
     expect(first.status).toBe(200)
     expect(first.body).toMatchObject({ rating: 'useful', dismissed: false, pinned: false })
     const again = await patch(rep, card.id, { rating: 'useful' })
     expect(again.body).toEqual(first.body)
-    expect(await rated()).toHaveLength(1)
+    const events = await rated()
+    expect(new Set(events.map((e) => e.id)).size).toBe(1)
+    const changed = await patch(rep, card.id, { rating: 'not_useful' })
+    expect(changed.status).toBe(200)
+    expect(new Set([...events, ...(await rated())].map((e) => e.id)).size).toBe(2)
     const listed = await get(rep, `/calls/${callId}/copilot/cards`)
-    expect((listed.body as { items: { rating: string }[] }).items[0]?.rating).toBe('useful')
+    expect((listed.body as { items: { rating: string }[] }).items[0]?.rating).toBe('not_useful')
+  })
+
+  it('delivers the event on a retry after a failed publish, under one id', async () => {
+    const card = await seedCard(org, callId)
+    const publish = t.deps.events.publish.bind(t.deps.events)
+    let calls = 0
+    t.deps.events.publish = async (...args) => {
+      if (++calls === 1) {
+        throw new Error('queue down')
+      }
+      return publish(...args)
+    }
+    expect((await patch(rep, card.id, { rating: 'useful' })).status).toBe(500)
+    expect((await patch(rep, card.id, { rating: 'useful' })).status).toBe(200)
+    const events = await rated()
+    expect(events).toHaveLength(1)
+    expect(events[0]?.id).toMatch(/^evt_[0-9a-f]{32}$/)
   })
 
   it('clears a rating with null, and dismissing clears the pin', async () => {

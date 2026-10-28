@@ -67,14 +67,15 @@ export type CopilotCardStore = {
   ) => Promise<CopilotCard[]>
   /**
    * Sets the card's rating, dismissal and pin to the end state {@link marked} gives. `changed` is
-   * false when the card already was in that state. Undefined when the Call has no such card.
+   * false when the card already was in that state. `updatedAt` is when the card last changed
+   * (unchanged by a repeat). Undefined when the Call has no such card.
    */
   mark: (
     organizationId: string,
     callId: string,
     cardId: string,
     mark: CardMark
-  ) => Promise<{ card: CopilotCard; changed: boolean } | undefined>
+  ) => Promise<{ card: CopilotCard; changed: boolean; updatedAt: Date } | undefined>
   /**
    * Turns the Call's retrieval card `cardId` into the composed card, in place (same id, sequence and
    * time). It returns the card whole, or undefined when there is no such retrieval card (already
