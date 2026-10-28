@@ -207,23 +207,30 @@ async function lineFor(
     }
     return line
   }
-  // The caller's own Line first, then a Team's, then their role's; the oldest Line in each.
-  const teamIds = await deps.directory.teamsOf(caller.organizationId, membershipId)
-  const tiers: LineAssignment[] = [
-    { kind: 'rep', membershipId },
-    ...teamIds.map((teamId) => ({ kind: 'team' as const, teamId })),
-    { kind: 'role', role: caller.role },
-  ] as LineAssignment[] // ids from the directory are branded strings at the edge
-  for (const assignedTo of tiers) {
-    const [found] = await deps.lines.list(caller.organizationId, {
-      limit: 1,
-      state: 'active',
-      assignedTo,
-      oldestFirst: true,
-    })
+  // The caller's own Line first, then a Team's, then their role's; the oldest Line in each. Teams
+  // are looked up only when the own Line is missing, so a directory outage cannot block it.
+  const firstOf = async (assignedTo: LineAssignment) =>
+    (
+      await deps.lines.list(caller.organizationId, {
+        limit: 1,
+        state: 'active',
+        assignedTo,
+        oldestFirst: true,
+      })
+    )[0]
+  const own = await firstOf({ kind: 'rep', membershipId } as LineAssignment)
+  if (own !== undefined) {
+    return own
+  }
+  for (const teamId of await deps.directory.teamsOf(caller.organizationId, membershipId)) {
+    const found = await firstOf({ kind: 'team', teamId } as LineAssignment)
     if (found !== undefined) {
       return found
     }
+  }
+  const byRole = await firstOf({ kind: 'role', role: caller.role })
+  if (byRole !== undefined) {
+    return byRole
   }
   throw domainError(VOICE_ERRORS['call.line_unavailable'])
 }

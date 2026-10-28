@@ -452,6 +452,7 @@ describe('sweeping outbound Calls that never progressed', () => {
 
 describe('which Line a Call is placed from', () => {
   const assignTo = async (assignment: Record<string, string>) => {
+    t.deps.clock.advance('1s') // distinct createdAt, so "oldest" is not a tie
     const bought = await t.call(admin, 'POST', '/lines', { method: 'buy', country: 'US' })
     const id = (bought.body as { id: string }).id
     const assigned = await t.call(admin, 'PUT', `/lines/${id}/assignment`, assignment)
