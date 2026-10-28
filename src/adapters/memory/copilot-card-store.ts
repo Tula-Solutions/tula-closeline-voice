@@ -1,22 +1,17 @@
-import { type CopilotCardId, formatId } from 'tula-closeline-contract'
-import {
-  type CopilotCardStore,
-  MAX_CARD_PAGE,
-  type SimilarMomentCard,
-} from '~/ports/copilot-card-store'
+import { type CopilotCard, type CopilotCardId, formatId } from 'tula-closeline-contract'
+import { type CopilotCardStore, MAX_CARD_PAGE } from '~/ports/copilot-card-store'
 
 /** An in-memory {@link CopilotCardStore} for tests and local runs. */
 export function createMemoryCopilotCardStore(): CopilotCardStore {
-  const byCall = new Map<string, SimilarMomentCard[]>()
+  const byCall = new Map<string, CopilotCard[]>()
   const keyOf = (organizationId: string, callId: string) => `${organizationId}\u0000${callId}`
   return {
     async append(organizationId, callId, card) {
       const cards = byCall.get(keyOf(organizationId, callId)) ?? []
       byCall.set(keyOf(organizationId, callId), cards)
-      const stored: SimilarMomentCard = {
-        kind: 'similar_moment',
+      const base = {
         id: formatId('ccard', crypto.randomUUID()) as CopilotCardId,
-        callId: callId as SimilarMomentCard['callId'],
+        callId: callId as CopilotCard['callId'],
         sequence: cards.length + 1,
         evidence: card.evidence,
         citedMoments: card.citedMoments,
@@ -26,8 +21,23 @@ export function createMemoryCopilotCardStore(): CopilotCardStore {
         dismissed: false,
         pinned: false,
       }
+      const stored: CopilotCard = card.source
+        ? { ...base, kind: 'document', source: card.source }
+        : { ...base, kind: 'similar_moment' }
       cards.push(stored)
       return structuredClone(stored)
+    },
+    async upgrade(organizationId, callId, cardId, composed) {
+      const cards = byCall.get(keyOf(organizationId, callId)) ?? []
+      const at = cards.findIndex((card) => card.id === cardId && card.kind === 'similar_moment')
+      const old = cards[at]
+      if (old === undefined) {
+        return undefined
+      }
+      const { kind: _kind, ...rest } = old
+      const upgraded = { ...rest, ...structuredClone(composed) } as CopilotCard
+      cards[at] = upgraded
+      return structuredClone(upgraded)
     },
     async list(organizationId, callId, afterSequence, limit) {
       const size = Math.min(Math.max(limit, 1), MAX_CARD_PAGE)

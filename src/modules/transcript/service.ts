@@ -18,6 +18,7 @@ export type TranscriptDeps = Pick<
   | 'calls'
   | 'callTurns'
   | 'copilotCards'
+  | 'llm'
   | 'copilotSettings'
   | 'evidence'
   | 'telephony'

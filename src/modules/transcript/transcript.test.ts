@@ -321,6 +321,39 @@ describe('GET /v1/calls/{callId}/copilot/stream', () => {
     expect(again.some((f) => f.includes('copilot.card'))).toBe(false)
   })
 
+  it('sends copilot.card_updated when the composer upgrades a card that was already sent', async () => {
+    const found = Array.from({ length: 3 }, (_, i) => ({
+      callId: formatId('call', crypto.randomUUID()),
+      dealRecordId: formatId('deal', crypto.randomUUID()),
+      score: 0.9 - i / 100,
+      prospect: `Too expensive ${i}`,
+      repNext: `Here is why ${i}`,
+    }))
+    t.deps.evidence.load(org, { moments: found as never })
+    const id = await placeScripted({ prospect: [{ text: 'that costs too much', afterBytes: 100 }] })
+    speak(id, 'prospect')
+    await Transcript.settled(t.deps, id)
+    const [card] = await t.deps.copilotCards.list(org, id, 0, 10)
+    const { score: _score, ...quote } = found[0] ?? ({} as never)
+    let upgraded: Promise<unknown> | undefined
+    // Upgrade the card in place only once the stream has sent it, so the update is not a race.
+    const seen = await frames(await open(rep, id), (s) => {
+      if (upgraded === undefined && s.some((f) => /event: copilot\.card\b(?!_)/.test(f))) {
+        upgraded = t.deps.copilotCards.upgrade(org, id, card?.id as never, {
+          kind: 'next_step',
+          nextStep: 'Book a pilot.',
+          citedMoments: [
+            { callId: found[0]?.callId, dealRecordId: found[0]?.dealRecordId },
+          ] as never,
+          quotes: [quote] as never,
+        })
+      }
+      return s.some((f) => f.includes('copilot.card_updated'))
+    })
+    await upgraded
+    expect(seen.find((f) => f.includes('copilot.card_updated'))).toContain('Book a pilot.')
+  })
+
   it('keeps the Call and its Transcript when the card search fails', async () => {
     Object.assign(t.deps, {
       evidence: {
