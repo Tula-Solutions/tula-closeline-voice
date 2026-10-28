@@ -34,6 +34,7 @@ export function createUnconfiguredTelephony(): TelephonyPort {
   const refuse = async (): Promise<never> => Promise.reject(unavailable())
   return {
     placeCall: refuse,
+    placeAgentCall: refuse,
     answerCall: refuse,
     playDisclosure: refuse,
     bridge: refuse,

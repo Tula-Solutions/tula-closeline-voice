@@ -20,6 +20,8 @@ from the hub (`tula-closeline`). This file holds only what is specific to this r
 
 Other scripts are in `package.json`.
 
+Every voice model call uses Haiku 5.5: `VOICE_LLM_MODELS` in `src/container.ts` sets both the fast and smart tiers to the kit's `DEFAULT_BEDROCK_FAST_MODEL`.
+
 ## Layout
 
 The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>/`.
