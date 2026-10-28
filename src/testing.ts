@@ -45,6 +45,7 @@ import {
 } from '~/adapters/memory/call-event-store'
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
+import { createMemoryChatRateLimiter } from '~/adapters/memory/chat-limits'
 import {
   createMemoryChatSites,
   createMemoryConsentRecorder,
@@ -210,6 +211,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     llm: createMemoryLlm({ sleep: async () => undefined, random: () => 0 }),
     idempotency: createMemoryIdempotencyStore(),
     chats: createMemoryChatStore(),
+    chatLimits: createMemoryChatRateLimiter(),
     chatSites: createMemoryChatSites(),
     consents: createMemoryConsentRecorder(),
     numbers: createMemoryNumberProvisioner(),

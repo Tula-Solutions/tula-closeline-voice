@@ -119,6 +119,11 @@ const schema = z
      * log it. Required outside `local`.
      */
     PHONE_HASH_KEY: z.string().min(32).max(512).optional(),
+    /**
+     * How many proxies sit in front of this service and append to `X-Forwarded-For`. At 0 the
+     * socket address is the client; at N the Nth entry from the right is (the ALB deployment sets 1).
+     */
+    TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(3).default(0),
     /** The bucket holding Call recordings. Required outside `local`. */
     STORAGE_BUCKET: z
       .string()

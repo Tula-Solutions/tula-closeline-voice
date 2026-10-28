@@ -20,9 +20,11 @@ type PublicChatMessageReply = z.infer<typeof publicChatMessageReplySchema>
 type PublicChatMessagePage = z.infer<typeof publicChatMessagePageSchema>
 
 import type { Container } from '~/container'
-import { domainError } from '~/http/domain-error'
+import { resolveClientAddress } from '~/http/client-address'
+import { domainError, RetryAfterError } from '~/http/domain-error'
 import { converse } from '~/modules/conversation/engine'
-import { idempotent } from '~/modules/idempotency/service'
+import { idempotent, idempotentOutside } from '~/modules/idempotency/service'
+import { CHAT_RATE_WINDOW_MS } from '~/ports/chat-limits'
 import type { ChatSite } from '~/ports/chat-sites'
 import type { StoredChat } from '~/ports/chat-store'
 
@@ -38,6 +40,7 @@ export type ChatDeps = Pick<
   | 'env'
   | 'idempotency'
   | 'chats'
+  | 'chatLimits'
   | 'chatSites'
   | 'consents'
 >
@@ -55,6 +58,15 @@ export const CHAT_TTL_MS = 24 * 60 * 60 * 1000
 
 /** The most visitor messages one Chat takes; it bounds the model spend of one session. */
 export const MAX_CHAT_MESSAGES = 60
+
+/** The most new Chats one site takes a minute, all visitors together. */
+export const CHAT_SESSIONS_PER_SITE_PER_MINUTE = 30
+
+/** The most new Chats one client address may start on one site a minute. */
+export const CHAT_SESSIONS_PER_IP_PER_MINUTE = 5
+
+/** The most visitor messages one site takes a minute, all Chats together; each one is a model call. */
+export const CHAT_MESSAGES_PER_SITE_PER_MINUTE = 120
 
 /** How often a message retries for a free turn when a concurrent message took its index. */
 const SEND_ATTEMPTS = 3
@@ -84,6 +96,31 @@ function tokenFor(deps: ChatDeps, organizationId: string, idempotencyKey: string
     .digest('base64url')
     .slice(0, 32)
   return `${hexOfOrganization(organizationId)}${secret}`
+}
+
+/**
+ * Counts one request against a limit of the site and refuses it with `rate.limited` and the
+ * seconds to the next minute when it is over. What is limited is hashed under the server's secret,
+ * so no address is stored.
+ */
+async function limit(
+  deps: ChatDeps,
+  organizationId: string,
+  what: string,
+  subject: string,
+  max: number
+): Promise<void> {
+  const keyHash = createHmac('sha256', deps.env.PHONE_HASH_KEY)
+    .update(`chat-limit\u0000${what}\u0000${organizationId}\u0000${subject}`)
+    .digest()
+  const now = deps.clock.now()
+  if (!(await deps.chatLimits.hit(organizationId, keyHash, now, max))) {
+    const retryAfter = Math.max(
+      1,
+      Math.ceil((CHAT_RATE_WINDOW_MS - (now.getTime() % CHAT_RATE_WINDOW_MS)) / 1000)
+    )
+    throw new RetryAfterError(ERRORS['rate.limited'], retryAfter, { retryAfter })
+  }
 }
 
 const sessionNotFound = () => domainError(CHAT_ERRORS['chat.session_not_found'])
@@ -149,9 +186,17 @@ export async function start(
     idempotencyKey: string
     sourceUrl: string
     honeypot: string
+    /** The caller's socket address and `X-Forwarded-For`, from which the client address is read. */
+    address: { socketAddress: string | undefined; forwardedFor: string | undefined }
   }
 ): Promise<{ body: PublicStartChatResponse; replayed: boolean }> {
   const site = await siteOfKey(deps, input.key, input.origin)
+  const client = resolveClientAddress({
+    ...input.address,
+    trustedProxyHops: deps.env.TRUSTED_PROXY_HOPS,
+  })
+  await limit(deps, site.organizationId, 'sessions', '', CHAT_SESSIONS_PER_SITE_PER_MINUTE)
+  await limit(deps, site.organizationId, 'sessions-ip', client, CHAT_SESSIONS_PER_IP_PER_MINUTE)
   const now = deps.clock.now()
   const expiresAt = new Date(now.getTime() + CHAT_TTL_MS)
   const message = (at: string) => [
@@ -219,44 +264,43 @@ export async function send(
   input: { token: string; origin: string; idempotencyKey: string; text: string }
 ): Promise<{ body: PublicChatMessageReply; replayed: boolean }> {
   const { organizationId, chat } = await sessionOf(deps, input.token, input.origin)
-  const answer = await deps.idempotency.withOrganization(organizationId, (scope) =>
-    idempotent(
-      deps,
-      scope,
-      scopeOf(organizationId, chat.id),
-      {
-        key: input.idempotencyKey,
-        route: CHAT_MESSAGE_ROUTE,
-        request: { chatId: chat.id, text: input.text },
-        status: 200,
-        response: publicChatMessageReplySchema,
-      },
-      async () => {
-        const conversation = { kind: 'chat' as const, id: chat.id }
-        for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt += 1) {
-          const turnIndex = await nextIndex(deps, organizationId, chat.id, input.text)
-          if (turnIndex / 2 >= MAX_CHAT_MESSAGES) {
-            throw domainError(CHAT_ERRORS['chat.session_closed'])
-          }
-          const result = await converse(deps, {
-            organizationId,
-            conversation,
-            turnIndex,
-            text: input.text,
-          })
-          // A concurrent message took this index first: its text was kept, so ask again further on.
-          if (result.prospectTurn.text !== input.text) {
-            continue
-          }
-          const at = result.agentTurn.createdAt
-          await deps.chats.touch(organizationId, chat.id, new Date(at))
-          return {
-            reply: { text: result.reply, deferred: result.deferred, handoffOffered: false, at },
-          }
+  await limit(deps, organizationId, 'messages', '', CHAT_MESSAGES_PER_SITE_PER_MINUTE)
+  // The model call runs outside any transaction: the key is claimed first and completed after.
+  const answer = await idempotentOutside(
+    deps,
+    scopeOf(organizationId, chat.id),
+    {
+      key: input.idempotencyKey,
+      route: CHAT_MESSAGE_ROUTE,
+      request: { chatId: chat.id, text: input.text },
+      status: 200,
+      response: publicChatMessageReplySchema,
+    },
+    async () => {
+      const conversation = { kind: 'chat' as const, id: chat.id }
+      for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt += 1) {
+        const turnIndex = await nextIndex(deps, organizationId, chat.id, input.text)
+        if (turnIndex / 2 >= MAX_CHAT_MESSAGES) {
+          throw domainError(CHAT_ERRORS['chat.session_closed'])
         }
-        throw domainError(ERRORS['request.idempotency_in_progress'])
+        const result = await converse(deps, {
+          organizationId,
+          conversation,
+          turnIndex,
+          text: input.text,
+        })
+        // A concurrent message took this index first: its text was kept, so ask again further on.
+        if (result.prospectTurn.text !== input.text) {
+          continue
+        }
+        const at = result.agentTurn.createdAt
+        await deps.chats.touch(organizationId, chat.id, new Date(at))
+        return {
+          reply: { text: result.reply, deferred: result.deferred, handoffOffered: false, at },
+        }
       }
-    )
+      throw domainError(ERRORS['request.idempotency_in_progress'])
+    }
   )
   return { body: answer.body, replayed: answer.replayed }
 }

@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import { formatId } from 'tula-closeline-contract'
 import { DEFAULT_AGENT_SETTINGS } from '~/modules/agent-settings/service'
 import { createTestApp, newOrganizationId, type TestApp } from '~/testing'
-import { CHAT_DISCLOSURE_VERSION, CHAT_DISCLOSURE_WORDING, MAX_CHAT_MESSAGES } from './service'
+import {
+  CHAT_DISCLOSURE_VERSION,
+  CHAT_DISCLOSURE_WORDING,
+  CHAT_MESSAGES_PER_SITE_PER_MINUTE,
+  CHAT_SESSIONS_PER_IP_PER_MINUTE,
+  CHAT_SESSIONS_PER_SITE_PER_MINUTE,
+  MAX_CHAT_MESSAGES,
+} from './service'
 
 const ORIGIN = 'https://acme.example'
 const KEY = 'pk_acme_0123456789abcdef0123456789abcdef'
@@ -29,28 +36,43 @@ const reply = (text = 'We have a Team plan.') =>
 async function call(
   method: string,
   path: string,
-  options: { body?: unknown; key?: string; origin?: string } = {}
+  options: {
+    body?: unknown
+    key?: string
+    origin?: string
+    ip?: string
+    forwardedFor?: string
+  } = {}
 ) {
   const headers: Record<string, string> = { origin: options.origin ?? ORIGIN }
+  if (options.forwardedFor !== undefined) {
+    headers['x-forwarded-for'] = options.forwardedFor
+  }
   if (options.key !== undefined) {
     headers['idempotency-key'] = options.key
   }
   if (options.body !== undefined) {
     headers['content-type'] = 'application/json'
   }
-  const response = await t.app.request(path, {
-    method,
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  })
+  const ip = options.ip ?? '203.0.113.7'
+  const response = await t.app.request(
+    path,
+    {
+      method,
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    },
+    { requestIP: () => ({ address: ip }) }
+  )
   const text = await response.text()
   return { status: response.status, body: (text === '' ? {} : JSON.parse(text)) as Json }
 }
 
 const startKey = () => `start-${crypto.randomUUID()}`
-const start = (key = startKey(), over: Json = {}) =>
+const start = (key = startKey(), over: Json = {}, ip?: string) =>
   call('POST', `/v1/public/chat/${KEY}/sessions`, {
     key,
+    ip,
     body: { sourceUrl: SOURCE, ...over },
   })
 const open = async () => (await start()).body.sessionToken as string
@@ -316,5 +338,117 @@ describe('callback consent', () => {
     const unticked = await post(token, consent({ callbackConsent: false }))
     expect(unticked.status).toBe(201)
     expect(t.deps.consents.recorded[0]?.agreed).toBe(false)
+  })
+})
+
+describe('rate limits', () => {
+  test('a sixth start in a minute from one address is rate.limited with Retry-After', async () => {
+    for (let i = 0; i < CHAT_SESSIONS_PER_IP_PER_MINUTE; i += 1) {
+      expect((await start()).status).toBe(201)
+    }
+    const over = await start()
+    expect([over.status, code(over)]).toEqual([429, 'rate.limited'])
+    expect((await start(startKey(), {}, '198.51.100.9')).status).toBe(201)
+  })
+
+  test('X-Forwarded-For does not move a caller to a fresh address when no proxy is trusted', async () => {
+    for (let i = 0; i < CHAT_SESSIONS_PER_IP_PER_MINUTE; i += 1) {
+      await start()
+    }
+    const spoof = await call('POST', `/v1/public/chat/${KEY}/sessions`, {
+      key: startKey(),
+      forwardedFor: '198.51.100.77',
+      body: { sourceUrl: SOURCE },
+    })
+    expect(code(spoof)).toBe('rate.limited')
+  })
+
+  test('the site as a whole takes only so many new sessions a minute', async () => {
+    for (let i = 0; i < CHAT_SESSIONS_PER_SITE_PER_MINUTE; i += 1) {
+      expect((await start(startKey(), {}, `10.0.${i >> 8}.${i & 255}`)).status).toBe(201)
+    }
+    const over = await start(startKey(), {}, '198.51.100.9')
+    expect([over.status, code(over)]).toEqual([429, 'rate.limited'])
+  })
+
+  test('the site as a whole takes only so many messages a minute', async () => {
+    const tokens = [await open(), await open()]
+    for (let i = 0; i < CHAT_MESSAGES_PER_SITE_PER_MINUTE; i += 1) {
+      t.deps.llm.reply(reply('ok'))
+      expect((await send(tokens[i % 2] as string, `m${i}`)).status).toBe(200)
+    }
+    const over = await send(tokens[0] as string, 'one more')
+    expect([over.status, code(over)]).toEqual([429, 'rate.limited'])
+    expect(t.deps.llm.requests()).toHaveLength(CHAT_MESSAGES_PER_SITE_PER_MINUTE)
+  })
+
+  test('a call with an unknown key or a foreign origin does not use up the limit', async () => {
+    for (let i = 0; i < CHAT_SESSIONS_PER_IP_PER_MINUTE + 1; i += 1) {
+      await call('POST', `/v1/public/chat/${'k'.repeat(40)}/sessions`, {
+        key: startKey(),
+        body: { sourceUrl: SOURCE },
+      })
+      await call('POST', `/v1/public/chat/${KEY}/sessions`, {
+        key: startKey(),
+        origin: 'https://evil.example',
+        body: { sourceUrl: SOURCE },
+      })
+    }
+    expect((await start()).status).toBe(201)
+  })
+})
+
+describe('a message in flight', () => {
+  test('no idempotency transaction is open while the model is asked', async () => {
+    const token = await open()
+    let open_ = 0
+    const store = t.deps.idempotency
+    t.deps.idempotency = {
+      ...store,
+      withOrganization: (organizationId, fn) => {
+        open_ += 1
+        return store.withOrganization(organizationId, fn).finally(() => {
+          open_ -= 1
+        })
+      },
+    }
+    const search = t.deps.evidence.search
+    let during = -1
+    t.deps.evidence.search = async (...args) => {
+      during = open_
+      return search(...args)
+    }
+    t.deps.llm.reply(reply())
+    expect((await send(token, 'What plans do you have?')).status).toBe(200)
+    expect(during).toBe(0)
+  })
+
+  test('the same key again while the first is running is request.idempotency_in_progress', async () => {
+    const token = await open()
+    const search = t.deps.evidence.search
+    let release: () => void = () => undefined
+    let reached: () => void = () => undefined
+    const running = new Promise<void>((resolve) => {
+      reached = resolve
+    })
+    t.deps.evidence.search = async (...args) => {
+      reached()
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return search(...args)
+    }
+    t.deps.llm.reply(reply())
+    const key = `msg-${crypto.randomUUID()}`
+    const first = send(token, 'What plans do you have?', key)
+    await running
+    const second = await send(token, 'What plans do you have?', key)
+    expect([second.status, code(second)]).toEqual([409, 'request.idempotency_in_progress'])
+    release()
+    const done = await first
+    expect(done.status).toBe(200)
+    const again = await send(token, 'What plans do you have?', key)
+    expect(again.body).toEqual(done.body)
+    expect(t.deps.llm.requests()).toHaveLength(1)
   })
 })

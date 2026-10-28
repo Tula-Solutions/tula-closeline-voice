@@ -26,10 +26,14 @@ const serverError = errorResponse('Something went wrong on our side.')
 const replayErrors = errorResponse(
   'request.idempotency_in_progress (409), or chat.session_closed: the Chat has ended.'
 )
+const limited = errorResponse('rate.limited: too many requests; see Retry-After.')
 const body = <S extends z.ZodType>(description: string, schema: S) => ({
   description,
   content: { 'application/json': { schema } },
 })
+
+/** What `Bun.serve` hands the app: where the socket address of the caller is read. */
+type ClientBindings = { requestIP?: (request: Request) => { address: string } | null }
 
 const startChat = createRoute({
   method: 'post',
@@ -55,6 +59,7 @@ const startChat = createRoute({
     403: errorResponse('chat.origin_not_allowed'),
     404: errorResponse('chat.key_invalid'),
     422: errorResponse('request.idempotency_key_reused'),
+    429: limited,
     500: serverError,
   },
 })
@@ -82,6 +87,7 @@ const sendMessage = createRoute({
     404: errorResponse('chat.session_not_found'),
     409: replayErrors,
     422: errorResponse('request.idempotency_key_reused'),
+    429: limited,
     500: serverError,
   },
 })
@@ -148,6 +154,10 @@ export function createChatRouter(container: Container): OpenAPIHono<AppEnv> {
       idempotencyKey: headers['idempotency-key'],
       sourceUrl: input.sourceUrl,
       honeypot: input.website,
+      address: {
+        socketAddress: (c.env as ClientBindings | undefined)?.requestIP?.(c.req.raw)?.address,
+        forwardedFor: c.req.header('x-forwarded-for'),
+      },
     })
     return result.replayed ? c.json(result.body, 200) : c.json(result.body, 201)
   })

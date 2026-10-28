@@ -183,6 +183,29 @@ export async function idempotent<S extends number, T>(
   const ref: IdempotencyKeyRef = { userId: caller.userId, route: call.route, key: call.key }
   const now = deps.clock.now()
   const expiredBefore = new Date(now.getTime() - IDEMPOTENCY_TTL_MS)
+  const replayed = await claimKey(deps, scope, caller, call, ref, now, expiredBefore)
+  if (replayed) {
+    return replayed
+  }
+  const body = await work()
+  await finish(deps, scope, caller, call, ref, body, expiredBefore)
+  return { status: call.status, body, replayed: false }
+}
+
+/**
+ * Claims the key in `scope`: the stored answer when the same request was answered before, and
+ * `undefined` when the key is now reserved for the caller. The same key with another request is
+ * `request.idempotency_key_reused`; a key another request holds is `request.idempotency_in_progress`.
+ */
+async function claimKey<S extends number, T>(
+  deps: IdempotencyDeps,
+  scope: IdempotencyScope,
+  caller: CallerIds,
+  call: IdempotentCall<S, T>,
+  ref: IdempotencyKeyRef,
+  now: Date,
+  expiredBefore: Date
+): Promise<IdempotentAnswer<S, T> | undefined> {
   const reserve = async () => {
     try {
       return await scope.reserve({
@@ -220,8 +243,47 @@ export async function idempotent<S extends number, T>(
       )
     }
   }
+  return undefined
+}
 
-  const body = await work()
-  await finish(deps, scope, caller, call, ref, body, expiredBefore)
-  return { status: call.status, body, replayed: false }
+/**
+ * Like {@link idempotent}, for `work` that is too slow to hold a transaction open (a model call).
+ * The key is claimed and committed first, in a transaction of its own; while it is held another
+ * request with the key is `request.idempotency_in_progress`. `work` then runs outside any
+ * transaction, and a second short transaction stores its answer. If `work` fails the key is
+ * released so the client can try again.
+ *
+ * shortcut: a process that dies while `work` runs leaves the key held until its 24 hour expiry;
+ * the client sends a new key. Upgrade to a lease column when that shows up in production.
+ */
+export async function idempotentOutside<S extends number, T>(
+  deps: IdempotencyDeps & Pick<Container, 'idempotency'>,
+  caller: CallerIds,
+  call: IdempotentCall<S, T>,
+  work: () => Promise<T>
+): Promise<IdempotentAnswer<S, T>> {
+  if (call.key === undefined) {
+    return { status: call.status, body: await work(), replayed: false }
+  }
+  const ref: IdempotencyKeyRef = { userId: caller.userId, route: call.route, key: call.key }
+  const now = deps.clock.now()
+  const expiredBefore = new Date(now.getTime() - IDEMPOTENCY_TTL_MS)
+  const inOrganization = <R>(fn: (scope: IdempotencyScope) => Promise<R>) =>
+    deps.idempotency.withOrganization(caller.organizationId, fn)
+  const replayed = await inOrganization((scope) =>
+    claimKey(deps, scope, caller, call, ref, now, expiredBefore)
+  )
+  if (replayed) {
+    return replayed
+  }
+  try {
+    const body = await work()
+    await inOrganization((scope) => finish(deps, scope, caller, call, ref, body, expiredBefore))
+    return { status: call.status, body, replayed: false }
+  } catch (error) {
+    await inOrganization((scope) => scope.remove(ref)).catch((releaseError) =>
+      logKey(deps, 'an idempotency key could not be released', caller, call, releaseError)
+    )
+    throw error
+  }
 }

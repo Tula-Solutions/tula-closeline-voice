@@ -48,6 +48,7 @@ import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-sto
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
+import { createPostgresChatRateLimiter } from '~/adapters/postgres/chat-limits'
 import { createPostgresChatStore } from '~/adapters/postgres/chat-store'
 import { createPostgresCopilotCardStore } from '~/adapters/postgres/copilot-card-store'
 import { createPostgresHandoffStore } from '~/adapters/postgres/handoff-store'
@@ -87,6 +88,7 @@ import type { BookingGateway } from '~/ports/booking-gateway'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { CallTurnStore } from '~/ports/call-turn-store'
+import type { ChatRateLimiter } from '~/ports/chat-limits'
 import type { ChatSites, ConsentRecorder } from '~/ports/chat-sites'
 import type { ChatStore } from '~/ports/chat-store'
 import type { CopilotCardStore } from '~/ports/copilot-card-store'
@@ -143,6 +145,8 @@ export type Container = {
   turns: AgentTurnStore
   /** The website Chats of every Organization. */
   chats: ChatStore
+  /** The per-minute counters that limit the public Chat routes. */
+  chatLimits: ChatRateLimiter
   /** What a publishable key stands for: its Organization, allowed origins and consent wording. */
   chatSites: ChatSites
   /** Records a Chat visitor's Prospect and Contact Consent in core. */
@@ -451,6 +455,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
     chats: createPostgresChatStore(database.db),
+    chatLimits: createPostgresChatRateLimiter(database.db),
     chatSites: createChatSites(env),
     consents: createConsents(env),
     handoffs: createPostgresHandoffStore(database.db),
