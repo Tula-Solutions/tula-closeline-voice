@@ -1,9 +1,23 @@
 import { type Container, reportSafely } from '~/container'
 import { internalErrorResponse } from '~/http/errors'
 import { resolveRequestId } from '~/http/request-id'
+import {
+  authorizeMedia,
+  createMediaSession,
+  type MediaContext,
+  type MediaSession,
+} from '~/modules/media/handler'
 
 /** The part of the app that the server needs. */
 type Fetcher = { fetch: (request: Request) => Response | Promise<Response> }
+
+/** What rides on each media socket: the Call it was signed for and its session once open. */
+export type MediaSocketData = { context: MediaContext; session?: MediaSession }
+
+/** The largest media frame accepted; the provider's are a few hundred bytes. */
+export const MEDIA_MAX_FRAME_BYTES = 16_384
+/** Seconds of silence after which a media socket is closed; the provider sends audio every 20 ms. */
+export const MEDIA_IDLE_SECONDS = 60
 
 /**
  * How far above the app's limit `Bun.serve`'s own limit sits. A client that is just over the app's
@@ -27,7 +41,34 @@ export const BODY_LIMIT_MARGIN_BYTES = 65_536
 export function serveOptions(container: Container, app: Fetcher) {
   return {
     port: container.env.PORT,
-    fetch: app.fetch,
+    fetch: async (
+      request: Request,
+      server: { upgrade: (request: Request, options: { data: MediaSocketData }) => boolean }
+    ): Promise<Response | undefined> => {
+      const media = await authorizeMedia(container, request)
+      if (media === undefined) {
+        return app.fetch(request)
+      }
+      if (media instanceof Response) {
+        return media
+      }
+      return server.upgrade(request, { data: { context: media } })
+        ? undefined
+        : new Response(null, { status: 400 })
+    },
+    websocket: {
+      maxPayloadLength: MEDIA_MAX_FRAME_BYTES,
+      idleTimeout: MEDIA_IDLE_SECONDS,
+      open: (ws: Bun.ServerWebSocket<MediaSocketData>) => {
+        ws.data.session = createMediaSession(container, ws.data.context, ws)
+      },
+      message: async (ws: Bun.ServerWebSocket<MediaSocketData>, data: string | Buffer) => {
+        await ws.data.session?.message(data)
+      },
+      close: async (ws: Bun.ServerWebSocket<MediaSocketData>) => {
+        await ws.data.session?.closed()
+      },
+    },
     maxRequestBodySize: container.env.MAX_REQUEST_BODY_BYTES + BODY_LIMIT_MARGIN_BYTES,
     development: container.env.ENVIRONMENT === 'local',
     error: (error: unknown): Response => {
