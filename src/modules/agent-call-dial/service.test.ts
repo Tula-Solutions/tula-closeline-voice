@@ -127,16 +127,33 @@ describe('what the Prospect does', () => {
     expect(telephony.operations.map((o) => o.operation)).not.toContain('playDisclosure')
   })
 
-  test('a human hears the Disclosure first, then the opening, and the Call is live', async () => {
-    t.deps.agentAudio.tts.speak([AUDIO])
-    t.deps.agentAudio.tts.speak([AUDIO])
+  test('a human hears the Disclosure first and the Call is live; the opening waits for the stream', async () => {
     await dial()
     await play(await providerSid())
     expect((await stored())?.state).toBe('live')
     const ops = telephony.operations.map((o) => o.operation)
     expect(ops.indexOf('playDisclosure')).toBeLessThan(ops.indexOf('startRecording'))
-    expect(t.deps.agentAudio.spoken.get(callId)?.length).toBeGreaterThan(0)
+    expect(t.deps.agentAudio.spoken.get(callId)).toBeUndefined()
     expect(t.deps.llm.requests()).toHaveLength(0)
+  })
+
+  test('opening speaks the goal and Organization name once the Call is live', async () => {
+    t.deps.agentAudio.tts.speak([AUDIO])
+    await dial()
+    await play(await providerSid())
+    expect(await Dial.open(t.deps, { organizationId: org as never, callId })).toEqual({
+      spoken: true,
+    })
+    expect(t.deps.agentAudio.spoken.get(callId)?.length).toBeGreaterThan(0)
+    expect(t.deps.agentAudio.tts.requests().length).toBeGreaterThan(0)
+  })
+
+  test('opening does nothing for a Call that is not live', async () => {
+    await dial()
+    expect(await Dial.open(t.deps, { organizationId: org as never, callId })).toEqual({
+      spoken: false,
+    })
+    expect(t.deps.agentAudio.tts.requests()).toHaveLength(0)
   })
 
   test('a failed Disclosure never reaches live: no opening and no model call', async () => {
@@ -380,5 +397,18 @@ describe('the routes', () => {
     expect((await detection('machine_start', 'AAAA')).status).toBe(403)
     expect((await row())?.result).toBeNull()
     expect(telephony.operations.map((o) => o.operation)).not.toContain('hangUp')
+  })
+})
+
+describe('openingWording', () => {
+  test('names the Organization and the goal, and falls back to the generic words', () => {
+    expect(Dial.openingWording({ goal: 'book a demo.', organizationName: 'Acme' })).toContain(
+      'Acme'
+    )
+    expect(Dial.openingWording({ goal: 'book a demo.', organizationName: 'Acme' })).toContain(
+      'book a demo'
+    )
+    expect(Dial.openingWording({ goal: null, organizationName: null })).toBe(Dial.OPENING_WORDING)
+    expect(Dial.openingWording(undefined)).toBe(Dial.OPENING_WORDING)
   })
 })

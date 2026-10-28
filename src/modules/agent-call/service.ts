@@ -169,7 +169,8 @@ export async function goLive(
   deps: Calls.CallDeps,
   organizationId: string,
   callId: VoiceCall['id'],
-  providerCallId: string
+  providerCallId: string,
+  streamUrl?: string
 ): Promise<GoLiveOutcome> {
   let live: StoredCall | undefined
   let played = false
@@ -196,6 +197,8 @@ export async function goLive(
           wordingVersion: AGENT_DISCLOSURE_WORDING.version,
           text: AGENT_DISCLOSURE_WORDING.text,
           aiAssisted: AGENT_DISCLOSURE_WORDING.aiAssisted,
+          // Replacing the call's instructions ends its first stream; this one carries the talk after.
+          ...(streamUrl === undefined ? {} : { streamUrl }),
         },
         options
       )

@@ -212,10 +212,19 @@ const schema = z
      */
     ASSEMBLYAI_API_KEY: z.string().min(1).max(256).optional(),
     /**
+     * The Cartesia key and voice id the Agent speaks with. Both are needed: without them a `local`
+     * run speaks scripted in-memory audio and any other environment hangs up an Agent Call after its
+     * Disclosure. A secret: never log it.
+     */
+    CARTESIA_API_KEY: z.string().min(1).max(256).optional(),
+    CARTESIA_VOICE_ID: z.string().min(1).max(128).optional(),
+    /**
      * How often, on average, each instance purges expired Twilio rows (jittered by 20% either way).
      * It runs only when `TELEPHONY_PROVIDER=twilio`, the one case that stores them in Postgres.
      */
     TWILIO_PURGE_INTERVAL_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(900_000),
+    /** The most queued Agent Calls one sweep pass dials; the next pass takes the rest. */
+    AGENT_DIAL_MAX_PER_PASS: z.coerce.number().int().min(1).max(1_000).default(20),
     /** The most Organizations one purge run visits; the next run takes the rest. */
     TWILIO_PURGE_MAX_ORGANIZATIONS: z.coerce.number().int().min(1).max(10_000).default(200),
     /** Longest one purge-source query (a scan page or an Organization's purge) may run, in ms. */

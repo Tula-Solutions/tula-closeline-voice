@@ -21,7 +21,14 @@ export type NewAgentCall = {
   /** Set exactly on a queued row: when the dial may be tried. */
   retryAt: Date | null
   createdAt: Date
+  /** What the Rep or Sequence wants of the Call, for the opening words; at most 500 characters. */
+  goal?: string | null
+  /** The Organization's name as of the request, for the opening words. */
+  organizationName?: string | null
 }
+
+/** What the Agent says about itself and the Call when it opens, kept at request time. */
+export type AgentCallOpening = { goal: string | null; organizationName: string | null }
 
 /** How a gate decision settles a queued row: refused for good, or deferred to a later time. */
 export type Settlement =
@@ -135,6 +142,12 @@ export type AgentCallStore = {
     id: string,
     finish: Finish
   ) => Promise<StoredAgentCall | undefined>
+  /** The goal and Organization name stored with the request; `undefined` when there is no such row. */
+  opening: (organizationId: string, id: string) => Promise<AgentCallOpening | undefined>
+  /** Up to `limit` Organization ids after `after`, ascending, that hold a queued row due at `now`. */
+  dueOrganizations: (now: Date, after: string | null, limit: number) => Promise<string[]>
+  /** Up to `limit` queued rows of the Organization whose `retryAt` is at or before `now`, oldest first. */
+  due: (organizationId: string, now: Date, limit: number) => Promise<StoredAgentCall[]>
   /** The Agent Call that owns a voice Call. */
   byCallId: (organizationId: string, callId: string) => Promise<StoredAgentCall | undefined>
 }

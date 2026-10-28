@@ -1,5 +1,6 @@
 import { formatId } from 'tula-closeline-contract'
 import { type Container, reportSafely } from '~/container'
+import { sweepDueAgentCalls } from '~/modules/agent-call-dial/scheduler'
 import { reapFailedCall } from '~/modules/agent-call-dial/service'
 import { DISCLOSURE_SPEECH_ALLOWANCE_MS } from '~/modules/call/service'
 import type { Caller } from '~/modules/caller'
@@ -156,7 +157,12 @@ export function startMissedSweep(container: Container): Schedule {
         shouldStop: isStopped,
       }
       return (
-        (await sweepMissed(container, options)) + (await sweepStaleOutbound(container, options))
+        (await sweepMissed(container, options)) +
+        (await sweepStaleOutbound(container, options)) +
+        (await sweepDueAgentCalls(container, {
+          maxPerPass: container.env.AGENT_DIAL_MAX_PER_PASS,
+          shouldStop: isStopped,
+        }))
       )
     },
     onError: reportError,

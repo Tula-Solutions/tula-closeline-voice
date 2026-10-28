@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm'
 import { agentCallSchema } from 'tula-closeline-contract'
 import { type Database, withOrganization } from 'tula-closeline-db'
 import { voiceAgentCalls, voiceLines } from 'tula-closeline-db/schema'
@@ -136,6 +136,8 @@ export function createPostgresAgentCallStore(db: Database): AgentCallStore {
               result: call.result,
               gateCode: call.gateCode,
               retryAt: call.retryAt,
+              goal: call.goal ?? null,
+              organizationName: call.organizationName ?? null,
               createdAt: call.createdAt,
               endedAt: call.state === 'ended' ? call.createdAt : null,
             })
@@ -286,6 +288,45 @@ export function createPostgresAgentCallStore(db: Database): AgentCallStore {
           .returning()
       )
       return row === undefined ? undefined : toStored(row)
+    },
+
+    async opening(organizationId, id) {
+      const [row] = await withOrganization(db, organizationId, (tx) =>
+        tx
+          .select({
+            goal: voiceAgentCalls.goal,
+            organizationName: voiceAgentCalls.organizationName,
+          })
+          .from(voiceAgentCalls)
+          .where(and(inOrg(organizationId), eq(voiceAgentCalls.id, id)))
+          .limit(1)
+      )
+      return row
+    },
+
+    async dueOrganizations(now, after, limit) {
+      const result = await db.execute<{ organization_id: string }>(
+        sql`select organization_id from voice.orgs_with_due_agent_calls(${now.toISOString()}::timestamptz, ${after}::text, ${limit}::int)`
+      )
+      return result.rows.map((row: { organization_id: string }) => row.organization_id)
+    },
+
+    async due(organizationId, now, limit) {
+      const rows = await withOrganization(db, organizationId, (tx) =>
+        tx
+          .select()
+          .from(voiceAgentCalls)
+          .where(
+            and(
+              inOrg(organizationId),
+              eq(voiceAgentCalls.state, 'queued'),
+              lte(voiceAgentCalls.retryAt, now)
+            )
+          )
+          .orderBy(asc(voiceAgentCalls.retryAt), asc(voiceAgentCalls.id))
+          .limit(limit)
+      )
+      return rows.map(toStored)
     },
 
     byCallId: (organizationId, callId) =>

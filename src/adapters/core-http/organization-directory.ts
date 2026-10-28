@@ -126,6 +126,8 @@ export function createCoreHttpOrganizationDirectory(
         ? answer.membershipId
         : undefined
     },
+    // shortcut: core has no internal route for an Organization's name yet, so the opening uses the generic words; add the call here when it does.
+    nameOf: async () => undefined,
     teamRepsOf: async (organizationId, membershipId) =>
       (
         await call(
