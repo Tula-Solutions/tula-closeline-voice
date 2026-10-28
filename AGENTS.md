@@ -75,6 +75,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   says so. Shortcut: open streams and the unavailable flag live in process memory (one instance,
   `container.copilot`); move them to a column before running more than one instance. The Twilio media
   websocket that feeds `Transcript.pushAudio` is not built yet.
+  `GET /v1/calls/{callId}/transcript` (`page.ts`) is the stored Transcript, cursor `{index}`: turns only when the Call's `transcriptState` is `ready`, `deleted` once the Recording is, else `pending` with no turns. Nothing sets `ready` yet.
 - Ports (`src/ports/`): `CallStore` (Postgres and memory; every event row is written in the same
   transaction as the change), `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
   requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
