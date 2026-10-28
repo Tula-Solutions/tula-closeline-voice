@@ -52,7 +52,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   `PUT /v1/calls/{id}/wrap-up`). `state.ts` holds the one edge table (`canTransition`): `live` is
   unreachable without a stored Disclosure version, and the stores enforce it. Placing needs an
   `Idempotency-Key`, stores the `ringing` Call in the idempotency transaction, then dials after
-  commit and leaves it `ringing` (the Copilot flag is kept in `copilot.dialed`, process memory). The
+  commit and leaves it `ringing` (the Copilot flag is stored on the Call, `voice.calls.copilot`, so any instance can take the answer; `sweepStaleOutbound` in `missed-sweep.ts` fails outbound Calls left `ringing` as `no_answer` or `connecting` as `provider_error` after twice `RING_TIMEOUT_MS` plus the Disclosure allowance). The
   provider's `in-progress` status callback (`Calls.onProviderStatus`, via the webhook) claims
   `ringing` to `connecting` and runs, in the background, the Disclosure (`DISCLOSURE_WORDING`,
   version 1, in `service.ts`; no setting, ADR 0003), the bridge, the Recording, `live`; the

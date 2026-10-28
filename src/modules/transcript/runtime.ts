@@ -18,12 +18,6 @@ export type OpenTranscript = {
 export type CopilotRuntime = {
   streams: Map<string, OpenTranscript>
   unavailable: Map<string, UnavailableReason>
-  /**
-   * Whether each dialled Call still ringing was placed with the Copilot on. Taken (read and
-   * removed) when the Prospect answers. shortcut: process memory, so a restart while a Call rings
-   * fails that Call closed; move it to a Call column before running more than one instance.
-   */
-  dialed: Map<string, boolean>
   /** How often an open SSE stream looks for new turns, in milliseconds. */
   pollMs: number
 }
@@ -33,7 +27,7 @@ export const MAX_REMEMBERED_CALLS = 5_000
 
 /** Builds an empty runtime. */
 export function createCopilotRuntime(pollMs = 500): CopilotRuntime {
-  return { streams: new Map(), unavailable: new Map(), dialed: new Map(), pollMs }
+  return { streams: new Map(), unavailable: new Map(), pollMs }
 }
 
 /** Remembers that a Call lost its Transcript, forgetting the oldest Call beyond the bound. */
@@ -48,20 +42,4 @@ export function markUnavailable(
   if (runtime.unavailable.size > MAX_REMEMBERED_CALLS && oldest !== undefined) {
     runtime.unavailable.delete(oldest)
   }
-}
-
-/** Remembers whether a dialled Call has the Copilot on, forgetting the oldest beyond the bound. */
-export function rememberDialed(runtime: CopilotRuntime, callId: string, copilot: boolean): void {
-  runtime.dialed.set(callId, copilot)
-  const oldest = runtime.dialed.keys().next().value
-  if (runtime.dialed.size > MAX_REMEMBERED_CALLS && oldest !== undefined) {
-    runtime.dialed.delete(oldest)
-  }
-}
-
-/** Reads and forgets whether a dialled Call has the Copilot on; `undefined` when not remembered. */
-export function takeDialed(runtime: CopilotRuntime, callId: string): boolean | undefined {
-  const copilot = runtime.dialed.get(callId)
-  runtime.dialed.delete(callId)
-  return copilot
 }

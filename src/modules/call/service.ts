@@ -23,7 +23,6 @@ import { describeError } from '~/describe-error'
 import { domainError } from '~/http/domain-error'
 import type { Caller } from '~/modules/caller'
 import { type IdempotentAnswer, idempotent, requestHash } from '~/modules/idempotency/service'
-import { rememberDialed, takeDialed } from '~/modules/transcript/runtime'
 import * as Transcript from '~/modules/transcript/service'
 import { InvalidTransitionError, type StoredCall } from '~/ports/call-store'
 import type { StoredLine } from '~/ports/line-store'
@@ -98,7 +97,7 @@ export const HANDOFF_DISCLOSURE_WORDING = {
  * Extra time the Disclosure step gets on top of the provider deadline: the provider waits for the
  * words to be spoken (up to about 18 s for the longest wording), which the plain deadline cannot hold.
  */
-const DISCLOSURE_SPEECH_ALLOWANCE_MS = 20_000
+export const DISCLOSURE_SPEECH_ALLOWANCE_MS = 20_000
 
 const E164 = /^\+[1-9][0-9]{6,14}$/
 
@@ -130,7 +129,12 @@ function requireVoiceRole(caller: Caller): void {
 
 /** Drops what is internal to the service (the provider's id) before a Call leaves it. */
 function toCall(stored: StoredCall): VoiceCall {
-  const { providerCallSid: _providerCallSid, agentCostMicroCents: _cost, ...call } = stored
+  const {
+    providerCallSid: _providerCallSid,
+    agentCostMicroCents: _cost,
+    copilot: _copilot,
+    ...call
+  } = stored
   return call
 }
 
@@ -250,13 +254,11 @@ async function dial(
   caller: Caller,
   call: StoredCall,
   from: string,
-  to: string,
-  copilot: boolean
+  to: string
 ): Promise<StoredCall> {
   const org = caller.organizationId
   let providerCallId: string | undefined
   try {
-    rememberDialed(deps.copilot, call.id, copilot)
     const placed = await withinDeadline(deps, (options) =>
       deps.telephony.placeCall(
         { organizationId: org, callId: call.id, idempotencyKey: call.id, from, to },
@@ -266,7 +268,6 @@ async function dial(
     providerCallId = placed.providerCallId
     await deps.calls.setProviderCallSid(org, call.id, providerCallId)
   } catch (error) {
-    takeDialed(deps.copilot, call.id)
     await failCall(deps, org, call, reasonOf(error), providerCallId)
     throw domainError(ERRORS['server.unavailable'])
   }
@@ -296,8 +297,8 @@ const RINGING_FAILURES: Partial<Record<TelephonyEventType, VoiceCallFailureReaso
  * the Disclosure, bridge and Recording in the background (the webhook must answer well inside the
  * provider's timeout), and a refusal, no answer or hang-up before answer fails the Call. Safe to
  * run twice for one event: only the `ringing` to `connecting` move starts the setup. Inbound Calls
- * and Calls past `ringing` are left alone. shortcut: the setup is in-process, so a crash after the
- * claim leaves the Call in `connecting`; a sweep like the missed-Call one should fail those.
+ * and Calls past `ringing` are left alone. The setup is in-process; a crash after the claim leaves
+ * the Call `connecting` until `sweepStaleOutbound` fails it.
  */
 export async function onProviderStatus(
   deps: CallDeps,
@@ -312,9 +313,8 @@ export async function onProviderStatus(
   const providerCallId = stored.providerCallSid
   if (type === 'answered') {
     if (providerCallId === null || stored.repMembershipId === null) {
-      // shortcut: the dial has not stored the provider's id yet; the provider may not retry a 5xx,
-      // and no sweep covers outbound ringing Calls, so a lost answer leaves the Call ringing.
-      // Upgrade with an outbound ringing/connecting sweep (follow-up).
+      // The dial has not stored the provider's id yet; if the provider does not retry the 5xx,
+      // `sweepStaleOutbound` fails the Call.
       throw domainError(ERRORS['server.unavailable'])
     }
     const claimed = await deps.calls
@@ -329,12 +329,7 @@ export async function onProviderStatus(
       return
     }
     const membershipId = stored.repMembershipId
-    const copilot = takeDialed(deps.copilot, callId)
-    const setup: Promise<unknown> =
-      copilot === undefined
-        ? // The words depend on the Copilot flag; guessing could under-disclose, so fail closed.
-          failCall(deps, organizationId, stored, 'provider_error', providerCallId)
-        : finish(deps, organizationId, membershipId, stored, providerCallId, copilot)
+    const setup = finish(deps, organizationId, membershipId, stored, providerCallId, stored.copilot)
     const task = setup.catch((error: unknown) =>
       deps.logger.warn('call.setup.failed', { callId, error: describeError(error) })
     )
@@ -344,7 +339,6 @@ export async function onProviderStatus(
   }
   const reason = RINGING_FAILURES[type]
   if (reason !== undefined) {
-    takeDialed(deps.copilot, callId)
     await failCall(deps, organizationId, stored, reason, undefined)
   }
 }
@@ -469,6 +463,7 @@ export async function place(
             repMembershipId: membershipId,
             prospectId: request.prospectId ?? null,
             prospectNumber: to,
+            copilot: request.copilot ?? false,
             idempotency: {
               key: new Bun.CryptoHasher('sha256')
                 .update(`${caller.userId}|${PLACE_CALL_ROUTE}|${idempotencyKey}`)
@@ -491,10 +486,14 @@ export async function place(
   const final = await dial(
     deps,
     caller,
-    { ...answer.body.call, providerCallSid: null, agentCostMicroCents: 0 },
+    {
+      ...answer.body.call,
+      providerCallSid: null,
+      agentCostMicroCents: 0,
+      copilot: request.copilot ?? false,
+    },
     line.number,
-    to,
-    request.copilot ?? false
+    to
   )
   return { ...answer, call: toCall(final) }
 }

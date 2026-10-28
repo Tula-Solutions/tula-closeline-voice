@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'bun:test'
 import { formatId } from 'tula-closeline-contract'
 import { TELEPHONY_ERROR_CODES } from 'tula-closeline-kit'
 import { createMemoryTelephony, type MemoryTelephony } from 'tula-closeline-kit/testing'
+import { sweepStaleOutbound } from '~/modules/call/missed-sweep'
 import * as Calls from '~/modules/call/service'
+import { createCopilotRuntime } from '~/modules/transcript/runtime'
 import {
   createTestApp,
   identityOf,
@@ -177,15 +179,15 @@ describe('placing a Call', () => {
     }
   )
 
-  it('fails a Call closed when the Copilot setting was lost before the Prospect answered', async () => {
+  it('uses the stored Copilot setting when another instance receives the answer', async () => {
     const { body } = await place(rep, { to: PROSPECT, copilot: true })
     const id = (body as PlacedBody).call.id
-    t.deps.copilot.dialed.clear()
+    // A fresh process memory stands for another instance or a restart.
+    Object.assign(t.deps, { copilot: createCopilotRuntime() })
     await answer(id)
     const call = await stateOf(id)
-    expect(call.state).toBe('failed')
-    expect(call.failureReason).toBe('provider_error')
-    expect(telephony.operations.map((entry) => entry.operation)).not.toContain('playDisclosure')
+    expect(call.state).toBe('live')
+    expect(call.disclosure.aiAssisted).toBe(true)
   })
 
   it('never returns the provider id', async () => {
@@ -408,5 +410,42 @@ describe('wrapping up a Call', () => {
     expect(ok.status).toBe(200)
     expect(JSON.stringify(ok.body)).toContain('Booked a demo')
     expect((await wrap(admin)).status).toBe(200)
+  })
+})
+
+describe('sweeping outbound Calls that never progressed', () => {
+  const sweepOutbound = (after: string) => {
+    t.deps.clock.advance(after)
+    return sweepStaleOutbound(t.deps, { maxOrganizations: 100, shouldStop: () => false })
+  }
+
+  it('fails a Call still ringing long after the ring time, and hangs up', async () => {
+    const { body } = await place(rep, { to: PROSPECT })
+    const id = (body as PlacedBody).call.id
+    expect(await sweepOutbound('60s')).toBe(0)
+    expect(await sweepOutbound('60s')).toBe(1)
+    const call = await stateOf(id)
+    expect(call.state).toBe('failed')
+    expect(call.failureReason).toBe('no_answer')
+    expect(telephony.operations.map((entry) => entry.operation)).toContain('hangUp')
+    expect(await sweepOutbound('60s')).toBe(0)
+  })
+
+  it('fails a Call stuck connecting as provider_error', async () => {
+    const { body } = await place(rep, { to: PROSPECT })
+    const id = (body as PlacedBody).call.id
+    await t.deps.calls.transition(organizationId, id as never, {
+      to: 'connecting',
+      at: t.deps.clock.now(),
+    })
+    expect(await sweepOutbound('3m')).toBe(1)
+    expect((await stateOf(id)).failureReason).toBe('provider_error')
+  })
+
+  it('leaves a live Call alone', async () => {
+    const { body } = await placeAnswered(rep, { to: PROSPECT })
+    const id = (body as PlacedBody).call.id
+    expect(await sweepOutbound('3m')).toBe(0)
+    expect((await stateOf(id)).state).toBe('live')
   })
 })
