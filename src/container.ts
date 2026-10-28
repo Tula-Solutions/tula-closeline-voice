@@ -53,6 +53,7 @@ import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store
 import { createPostgresChatRateLimiter } from '~/adapters/postgres/chat-limits'
 import { createPostgresChatStore } from '~/adapters/postgres/chat-store'
 import { createPostgresCopilotCardStore } from '~/adapters/postgres/copilot-card-store'
+import { createPostgresCopilotSettingsStore } from '~/adapters/postgres/copilot-settings-store'
 import { createPostgresHandoffStore } from '~/adapters/postgres/handoff-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
@@ -94,6 +95,7 @@ import type { ChatRateLimiter } from '~/ports/chat-limits'
 import type { ChatSites, ConsentRecorder } from '~/ports/chat-sites'
 import type { ChatStore } from '~/ports/chat-store'
 import type { CopilotCardStore } from '~/ports/copilot-card-store'
+import type { CopilotSettingsStore } from '~/ports/copilot-settings-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { HandoffStore } from '~/ports/handoff-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
@@ -148,6 +150,8 @@ export type Container = {
   contactGuard: ContactGuard
   /** The Inbound Agent settings of every Organization, one row each. */
   agentSettings: AgentSettingsStore
+  /** The Copilot settings of every Organization, one row each. */
+  copilotSettings: CopilotSettingsStore
   /** The Qualification questions of every Organization, in the order the Agent asks them. */
   questions: QualificationQuestionStore
   /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
@@ -467,6 +471,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
         : createUnconfiguredProspectDirectory(),
     contactGuard: createContactGuard(env, logger),
     agentSettings: createPostgresAgentSettingsStore(database.db),
+    copilotSettings: createPostgresCopilotSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
     chats: createPostgresChatStore(database.db),

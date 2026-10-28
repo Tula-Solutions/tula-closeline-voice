@@ -1,16 +1,18 @@
 import {
   copilotCardSchema,
-  DEFAULT_COPILOT_MIN_DEALS,
-  DEFAULT_COPILOT_MIN_MOMENTS,
   formatId,
   MAX_COPILOT_CARDS_PER_CALL,
   type SearchTurn,
 } from 'tula-closeline-contract'
 import type { Container } from '~/container'
+import { forOrganization } from '~/modules/copilot-settings/service'
 import type { MomentSearch } from '~/ports/evidence-search'
 
 /** What the retrieval cards need from the container. */
-export type CardDeps = Pick<Container, 'copilotCards' | 'evidence' | 'copilot' | 'clock' | 'logger'>
+export type CardDeps = Pick<
+  Container,
+  'copilotCards' | 'copilotSettings' | 'evidence' | 'copilot' | 'clock' | 'logger'
+>
 
 /** The least time between two cards on a Call, in milliseconds. */
 export const MIN_CARD_GAP_MS = 8_000
@@ -91,10 +93,11 @@ export async function onProspectTurn(
       .filter((item) => !shown.has(item.callId) && !seen.has(item.callId) && seen.add(item.callId))
       .slice(0, SEARCH_LIMIT)
     // The minimum is the Playbook's own count, over all the Moments it found, not the few shown.
+    const min = await forOrganization(deps, organizationId)
     if (
       items.length === 0 ||
-      found.evidence.moments < DEFAULT_COPILOT_MIN_MOMENTS ||
-      found.evidence.deals < DEFAULT_COPILOT_MIN_DEALS
+      found.evidence.moments < min.minMoments ||
+      found.evidence.deals < min.minDeals
     ) {
       return
     }
