@@ -79,8 +79,12 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   `/internal/v1/directory/*` routes with a per-attempt timeout and bounded jittered retry on
   network errors and 5xx, and any failure is `server.unavailable`; an Organization that is not
   `active` has no Membership). Memory adapters are in `src/adapters/memory/`;
-  `src/adapters/unconfigured/` fails closed with `server.unavailable` until the Twilio number
-  adapter exists.
+  `src/adapters/twilio/number-provisioner.ts` is the Twilio `NumberProvisioner` (API key over basic
+  auth; 5 s per attempt, 3 jittered attempts for reads only, the purchase POST is never retried):
+  `buy` searches then buys, names it `Closeline (bought)` and points `VoiceUrl` at
+  `/webhooks/twilio/inbound`; `port` attaches a number the account already owns, any other is
+  `line.number_unavailable`; `release` deletes only a `Closeline (bought)` number, else clears its
+  `VoiceUrl`. `src/adapters/unconfigured/` fails closed with `server.unavailable` elsewhere.
 - `src/modules/recording/` copies a Call's Recording and announces the Call. A final Call state (wrapped by `publishOnFinal`) and a completed recording callback queue a `voice.recording_finish` job on `JOBS_QUEUE_URL`; `runJobs` (scheduled from `server.ts`) runs `finish`, which streams the Recording from the provider into the object store at `recordings/<callId>.wav` (size capped by `RECORDING_MAX_BYTES`), publishes `voice.call.ended` on `QUEUE_URL` with an id derived from the Call id (so a redelivery repeats the same id), then marks the row `stored` and deletes the provider's copy. `GET/DELETE /v1/calls/{id}/recording`: a 300 s signed URL for the caller's visible Calls; delete is Owner/Admin and schedules the file `RECORDING_PURGE_DELAY_MS` out, `purgeRecordings` removes it (via `voice.orgs_with_due_recordings`) and keeps a tombstone row. `GET /internal/v1/calls/{id}/recording` streams the file (shared secret plus `X-Organization-Id`). `PHONE_HASH_KEY` makes the event's `prospectPhoneHash`. Limits: no outbox for the enqueue, no consumer dedupe, no event if the recording callback never arrives.
 - `src/modules/webhook/` receives Twilio status and recording callbacks (unauthenticated, verified by
   `X-Twilio-Signature` over `WEBHOOK_BASE_URL` + path; bad signature is 403 and changes nothing;
