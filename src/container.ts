@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { RequestId } from 'tula-closeline-contract'
+import { formatId, type RequestId } from 'tula-closeline-contract'
 import { createDb, type Database } from 'tula-closeline-db'
 import {
   type AnyDefinition,
@@ -316,9 +316,34 @@ function createLlm(env: Env, logger: Logger): LlmPort {
   return createBedrockLlm({ region: env.AWS_REGION, logger, models: voiceLlmModels(env) })
 }
 
+/** The publishable key a local run registers for the dev Organization; a key is public by design. */
+export const LOCAL_CHAT_KEY = 'pk_local_chat_0123456789abcdef0123456789abcdef'
+
+/** The Consent Wording a local Chat site shows. */
+const LOCAL_CHAT_WORDING = {
+  id: formatId('cwd', '00000000-0000-4000-8000-000000000001'),
+  version: 1,
+}
+
 /** Picks the chat sites: memory for a local run, otherwise fail closed until the intake service resolves keys. */
-function createChatSites(env: Env): ChatSites {
-  return env.ENVIRONMENT === 'local' ? createMemoryChatSites() : createUnconfiguredChatSites()
+function createChatSites(env: Env, logger: Logger): ChatSites {
+  if (env.ENVIRONMENT !== 'local') {
+    return createUnconfiguredChatSites()
+  }
+  const sites = createMemoryChatSites()
+  if (env.LOCAL_CHAT_ORGANIZATION_ID !== undefined) {
+    const allowedOrigins = (env.LOCAL_CHAT_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin !== '')
+    sites.register(LOCAL_CHAT_KEY, {
+      organizationId: env.LOCAL_CHAT_ORGANIZATION_ID,
+      allowedOrigins,
+      wording: LOCAL_CHAT_WORDING,
+    })
+    logger.info('local chat key registered', { key: LOCAL_CHAT_KEY, allowedOrigins })
+  }
+  return sites
 }
 
 /** Picks the consent recorder: memory for a local run, otherwise fail closed until core has the route. */
@@ -476,7 +501,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     turns: createPostgresAgentTurnStore(database.db),
     chats: createPostgresChatStore(database.db),
     chatLimits: createPostgresChatRateLimiter(database.db),
-    chatSites: createChatSites(env),
+    chatSites: createChatSites(env, logger),
     consents: createConsents(env),
     handoffs: createPostgresHandoffStore(database.db),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),

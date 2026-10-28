@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import {
   CHAT_ERRORS,
+  consentWordingIdSchema,
   decodeCursor,
   ERRORS,
   encodeCursor,
@@ -8,6 +9,7 @@ import {
   organizationIdSchema,
   type PublicChatConsentReceipt,
   type PublicChatConsentRequest,
+  type PublicChatConsentWording,
   publicChatConsentReceiptSchema,
   type publicChatMessagePageSchema,
   publicChatMessageReplySchema,
@@ -70,6 +72,12 @@ export const CHAT_MESSAGES_PER_CHAT_PER_MINUTE = 10
 
 /** The most visitor messages one site takes a minute, all Chats together; each one is a model call. */
 export const CHAT_MESSAGES_PER_SITE_PER_MINUTE = 120
+
+/** The most consent wording reads one client address may make on one site a minute. */
+export const CHAT_WORDING_PER_IP_PER_MINUTE = 30
+
+/** The most consent wording reads one site takes a minute, all visitors together. */
+export const CHAT_WORDING_PER_SITE_PER_MINUTE = 300
 
 /** How often a message retries for a free turn when a concurrent message took its index. */
 const SEND_ATTEMPTS = 3
@@ -409,4 +417,53 @@ export async function recordConsent(
     )
   )
   return { body: answer.body, replayed: answer.replayed }
+}
+
+/**
+ * The origins the path's site allows, for the CORS answer. A key or session path of an unknown
+ * site allows none. Only the path is read, so nothing here depends on the body or the session.
+ */
+export async function allowedOriginsOfPath(
+  deps: Pick<ChatDeps, 'chatSites'>,
+  pathname: string
+): Promise<readonly string[]> {
+  const [, , , , first, second] = pathname.split('/')
+  const site =
+    first === 'sessions'
+      ? await siteOfSessionPath(deps, second)
+      : first === undefined
+        ? undefined
+        : await deps.chatSites.ofKey(first)
+  return site?.allowedOrigins ?? []
+}
+
+async function siteOfSessionPath(deps: Pick<ChatDeps, 'chatSites'>, token: string | undefined) {
+  const organizationId = token === undefined ? undefined : organizationOfToken(token)
+  return organizationId === undefined ? undefined : deps.chatSites.ofOrganization(organizationId)
+}
+
+/**
+ * The Consent Wording id and version the site's callback box must show now. Public, so it is
+ * limited by client address and by site like the other Chat routes (ADR 0003: the widget shows
+ * this wording before it asks for a call, and sends both back).
+ */
+export async function consentWording(
+  deps: ChatDeps,
+  input: {
+    key: string
+    origin: string
+    address: { socketAddress: string | undefined; forwardedFor: string | undefined }
+  }
+): Promise<PublicChatConsentWording> {
+  const site = await siteOfKey(deps, input.key, input.origin)
+  const client = resolveClientAddress({
+    ...input.address,
+    trustedProxyHops: deps.env.TRUSTED_PROXY_HOPS,
+  })
+  await limit(deps, site.organizationId, 'wording', '', CHAT_WORDING_PER_SITE_PER_MINUTE)
+  await limit(deps, site.organizationId, 'wording-ip', client, CHAT_WORDING_PER_IP_PER_MINUTE)
+  return {
+    consentWordingId: consentWordingIdSchema.parse(site.wording.id),
+    consentWordingVersion: site.wording.version,
+  }
 }

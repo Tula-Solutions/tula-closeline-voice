@@ -52,6 +52,7 @@ test('the app serves its OpenAPI document describing every route and the error b
     '/v1/lines/{lineId}/release',
     '/v1/public/chat/sessions/{sessionToken}/callback-consent',
     '/v1/public/chat/sessions/{sessionToken}/messages',
+    '/v1/public/chat/{key}/consent-wording',
     '/v1/public/chat/{key}/sessions',
     '/v1/softphone/token',
     '/webhooks/twilio/detection',
