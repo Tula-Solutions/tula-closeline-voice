@@ -30,6 +30,7 @@ import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-sto
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
+import { createPostgresHandoffStore } from '~/adapters/postgres/handoff-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import { createPostgresQualificationQuestionStore } from '~/adapters/postgres/qualification-question-store'
@@ -54,6 +55,7 @@ import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { CallTurnStore } from '~/ports/call-turn-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
+import type { HandoffStore } from '~/ports/handoff-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
@@ -95,6 +97,10 @@ export type Container = {
   questions: QualificationQuestionStore
   /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
   turns: AgentTurnStore
+  /** The warm Handoffs of Agent Calls to Reps. */
+  handoffs: HandoffStore
+  /** Waits `ms`; the Handoff ring polls with it, and a test replaces it to answer mid-ring. */
+  sleep: (ms: number) => Promise<void>
   /** What Prospects answered to the Qualification questions, and the summary of it. */
   qualification: QualificationStore
   /** Free times and Bookings of an Organization, held by core. */
@@ -294,6 +300,8 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     agentSettings: createPostgresAgentSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
+    handoffs: createPostgresHandoffStore(database.db),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     qualification: createPostgresQualificationStore(database.db),
     booking: createBooking(env),
     // The Playbook's internal search route; only a local run without PLAYBOOK_INTERNAL_* gets the

@@ -180,6 +180,18 @@ export type CallStore = {
     id: VoiceCall['id'],
     disclosure: { wordingVersion: number; aiAssisted: boolean; playedAt: Date }
   ) => Promise<StoredCall | undefined>
+  /**
+   * Seats a Rep on a `live` Agent Call that has none (a warm Handoff) and stores the Disclosure
+   * that played to them, logging it. `undefined` when the Call is missing, not live or has a Rep.
+   */
+  joinRep: (
+    organizationId: string,
+    id: VoiceCall['id'],
+    join: {
+      repMembershipId: string
+      disclosure: { wordingVersion: number; aiAssisted: boolean; playedAt: Date }
+    }
+  ) => Promise<StoredCall | undefined>
   /** Logs that the Recording started; only after the Disclosure has played. */
   recordRecordingStarted: (organizationId: string, id: VoiceCall['id'], at: Date) => Promise<void>
   /** Sets the wrap-up of an ended Call; a field left out is kept and `null` clears it. */
