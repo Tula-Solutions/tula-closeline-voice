@@ -180,6 +180,8 @@ async function buyAndRecord(
     return toLine(stored)
   } catch (error) {
     if (error instanceof NumberTakenError) {
+      // Another live Line holds this number: giving it back would cut that Line off at the provider.
+      held.providerSid = null
       throw domainError(VOICE_ERRORS['line.number_unavailable'])
     }
     throw error
