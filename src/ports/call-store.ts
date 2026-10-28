@@ -17,7 +17,12 @@ export type StoredCall = VoiceCall & {
   agentCostMicroCents: number
   /** Whether the Call was placed with the Copilot on; set at place time, never changed. */
   copilot: boolean
+  /** Why the live Transcript stopped, or null while it has not; shared by every instance. */
+  transcriptUnavailable: TranscriptUnavailableReason | null
 }
+
+/** Why a Call's live Transcript stopped, as the stream names it. */
+export type TranscriptUnavailableReason = 'speech_to_text_failed' | 'stream_dropped'
 
 /** What the store needs to create an outbound Call; it starts `ringing`. */
 export type NewCall = {
@@ -187,6 +192,12 @@ export type CallStore = {
     organizationId: string,
     id: VoiceCall['id'],
     providerCallSid: string
+  ) => Promise<void>
+  /** Records that the live Transcript of a Call stopped; the Call itself is untouched. */
+  markTranscriptUnavailable: (
+    organizationId: string,
+    id: VoiceCall['id'],
+    reason: TranscriptUnavailableReason
   ) => Promise<void>
   /**
    * Moves a Call along {@link canTransition}, setting the times, the duration and the failure

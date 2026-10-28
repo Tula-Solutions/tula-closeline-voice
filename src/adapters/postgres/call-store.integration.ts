@@ -55,6 +55,17 @@ describe('the Postgres Call store', () => {
     expect((await calls.get(org, off.id))?.copilot).toBe(false)
   })
 
+  test('marks the Transcript unavailable, for its own Organization only', async () => {
+    const org = newOrganization()
+    const other = newOrganization()
+    const call = await calls.insert(org, await callFor(org))
+    expect((await calls.get(org, call.id))?.transcriptUnavailable).toBeNull()
+    await calls.markTranscriptUnavailable(other, call.id, 'stream_dropped')
+    expect((await calls.get(org, call.id))?.transcriptUnavailable).toBeNull()
+    await calls.markTranscriptUnavailable(org, call.id, 'speech_to_text_failed')
+    expect((await calls.get(org, call.id))?.transcriptUnavailable).toBe('speech_to_text_failed')
+  })
+
   test('fails stale outbound Calls by their state, for their own Organization only', async () => {
     const org = newOrganization()
     const other = newOrganization()

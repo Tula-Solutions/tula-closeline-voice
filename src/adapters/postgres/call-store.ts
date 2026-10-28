@@ -62,6 +62,7 @@ function toStored(row: Row): StoredCall {
     providerCallSid: row.providerCallSid,
     agentCostMicroCents: Number(row.agentCostMicroCents),
     copilot: row.copilot,
+    transcriptUnavailable: row.transcriptUnavailable,
   }
 }
 
@@ -373,6 +374,15 @@ export function createPostgresCallStore(db: Database): CallStore {
         tx
           .update(voiceCalls)
           .set({ providerCallSid, updatedAt: sql`now()` })
+          .where(one(organizationId, id))
+      )
+    },
+
+    async markTranscriptUnavailable(organizationId, id, reason) {
+      await withOrganization(db, organizationId, (tx) =>
+        tx
+          .update(voiceCalls)
+          .set({ transcriptUnavailable: reason, updatedAt: sql`now()` })
           .where(one(organizationId, id))
       )
     },

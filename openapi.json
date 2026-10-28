@@ -11382,7 +11382,7 @@
           "copilot"
         ],
         "summary": "Stream the live Transcript of a Call",
-        "description": "Server-Sent Events: copilot.status, then transcript.turn for each final turn in order, and transcript.unavailable if speech-to-text fails (the Call goes on). Opens once the Call is disclosing and says waiting_for_disclosure until an AI-assisted Disclosure has played. `Last-Event-ID` resumes from what is stored. A Call the caller may not see, or of another Organization, is call.not_found. Turn text is untrusted data.",
+        "description": "Server-Sent Events: copilot.status, then transcript.turn for each final turn in order, and transcript.unavailable if speech-to-text fails (the Call goes on). A stream ends after a few minutes, so the token is checked again when the client reconnects with `Last-Event-ID`. Opens once the Call is disclosing and says waiting_for_disclosure until an AI-assisted Disclosure has played. `Last-Event-ID` resumes from what is stored. A Call the caller may not see, or of another Organization, is call.not_found. Turn text is untrusted data.",
         "security": [
           {
             "accessToken": []
