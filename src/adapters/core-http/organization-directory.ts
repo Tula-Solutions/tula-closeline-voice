@@ -1,10 +1,13 @@
 import {
   ERRORS,
+  internalDirectoryMemberCheckResponseSchema,
   internalDirectoryMembershipResponseSchema,
   internalDirectoryRepCheckResponseSchema,
+  internalDirectoryRoleMembersResponseSchema,
   internalDirectoryTeamCheckResponseSchema,
   internalDirectoryTeamRepsResponseSchema,
   internalDirectoryTeamRingMembersResponseSchema,
+  internalDirectoryTeamsOfResponseSchema,
 } from 'tula-closeline-contract'
 import { AppError } from 'tula-closeline-kit'
 import type { z } from 'zod'
@@ -16,6 +19,10 @@ export const CORE_DIRECTORY_TIMEOUT_MS = 3_000
 export const CORE_DIRECTORY_RETRIES = 2
 /** The base of the exponential backoff between attempts, in milliseconds. */
 const BACKOFF_BASE_MS = 100
+/** The most Membership ids a role lookup returns, the ring cap the port promises. */
+const MAX_ROLE_MEMBERS = 50
+/** The most pages a role lookup follows; a bound on a core that keeps returning short pages. */
+const MAX_ROLE_PAGES = 5
 
 /** Options for {@link createCoreHttpOrganizationDirectory}. */
 export type CoreHttpDirectoryOptions = {
@@ -144,19 +151,39 @@ export function createCoreHttpOrganizationDirectory(
           internalDirectoryRepCheckResponseSchema
         )
       ).isRep,
-    // shortcut: core has no member-check, role-members or teams-of route yet, so a non-Rep member
-    // is not found, a role rings nobody and a Team Line is not found for a caller; add the routes
-    // in core and the contract, then call them here.
     isMember: async (organizationId, membershipId) =>
       (
         await call(
-          '/internal/v1/directory/rep-check',
+          '/internal/v1/directory/member-check',
           { organizationId, membershipId },
-          internalDirectoryRepCheckResponseSchema
+          internalDirectoryMemberCheckResponseSchema
         )
-      ).isRep,
-    roleMembers: async () => [],
-    teamsOf: async () => [],
+      ).isMember,
+    roleMembers: async (organizationId, role) => {
+      const ids: string[] = []
+      let after: string | undefined
+      for (let page = 0; page < MAX_ROLE_PAGES && ids.length < MAX_ROLE_MEMBERS; page++) {
+        const answer = await call(
+          '/internal/v1/directory/role-members',
+          { organizationId, role, ...(after === undefined ? {} : { after }) },
+          internalDirectoryRoleMembersResponseSchema
+        )
+        ids.push(...answer.membershipIds)
+        if (answer.next === null) {
+          break
+        }
+        after = answer.next
+      }
+      return ids.slice(0, MAX_ROLE_MEMBERS)
+    },
+    teamsOf: async (organizationId, membershipId) =>
+      (
+        await call(
+          '/internal/v1/directory/teams-of',
+          { organizationId, membershipId },
+          internalDirectoryTeamsOfResponseSchema
+        )
+      ).teamIds,
     teamExists: async (organizationId, teamId) =>
       (
         await call(
