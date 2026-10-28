@@ -4,6 +4,7 @@ import { createDb, type Database } from 'tula-closeline-db'
 import {
   type AnyDefinition,
   type Clock,
+  createAssemblyAiStreamingTranscribe,
   createLogger,
   createRemoteKeySet,
   createTokenVerifier,
@@ -15,6 +16,7 @@ import {
   type MessageRegistry,
   type ObjectStore,
   type Queue,
+  type StreamingTranscribePort,
   systemClock,
   type TelephonyPort,
   type TokenVerifier,
@@ -25,9 +27,12 @@ import { createS3ObjectStore } from 'tula-closeline-kit/storage'
 import {
   createMemoryObjectStore,
   createMemoryQueue,
+  createMemoryStreamingTranscribe,
   createMemoryTelephony,
 } from 'tula-closeline-kit/testing'
+import { createCoreHttpBookingGateway } from '~/adapters/core-http/booking-gateway'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
+import { createMemoryBookingGateway } from '~/adapters/memory/booking-gateway'
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
@@ -36,16 +41,20 @@ import { createPostgresAgentSettingsStore } from '~/adapters/postgres/agent-sett
 import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-store'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
+import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import { createPostgresQualificationQuestionStore } from '~/adapters/postgres/qualification-question-store'
+import { createPostgresQualificationStore } from '~/adapters/postgres/qualification-store'
 import { createPostgresRecordingStore } from '~/adapters/postgres/recording-store'
 import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
 import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import {
+  createUnconfiguredBookingGateway,
   createUnconfiguredEvidenceSearch,
   createUnconfiguredNumberProvisioner,
   createUnconfiguredOrganizationDirectory,
+  createUnconfiguredStreamingTranscribe,
 } from '~/adapters/unconfigured'
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
@@ -57,16 +66,20 @@ import {
   type JobEnvelope,
   jobRegistry,
 } from '~/modules/recording/messages'
+import { type CopilotRuntime, createCopilotRuntime } from '~/modules/transcript/runtime'
 import type { AgentSettingsStore } from '~/ports/agent-settings-store'
 import type { AgentTurnStore } from '~/ports/agent-turn-store'
+import type { BookingGateway } from '~/ports/booking-gateway'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
+import type { CallTurnStore } from '~/ports/call-turn-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 import type { QualificationQuestionStore } from '~/ports/qualification-question-store'
+import type { QualificationStore } from '~/ports/qualification-store'
 import type { RecordingStore } from '~/ports/recording-store'
 import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
 
@@ -103,6 +116,10 @@ export type Container = {
   questions: QualificationQuestionStore
   /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
   turns: AgentTurnStore
+  /** What Prospects answered to the Qualification questions, and the summary of it. */
+  qualification: QualificationStore
+  /** Free times and Bookings of an Organization, held by core. */
+  booking: BookingGateway
   /** Finds an Organization's own Documents and Moments for the Agent to answer from. */
   evidence: EvidenceSearch
   /** The language model the Agent writes its replies with. */
@@ -127,6 +144,12 @@ export type Container = {
   events: Queue<EventEnvelope>
   /** Our own jobs queue: finishing a Call's Recording and its event. */
   jobs: Queue<JobEnvelope>
+  /** The final Transcript turns of Copilot Calls, saved once each. */
+  callTurns: CallTurnStore
+  /** Speech-to-text streams: AssemblyAI, an in-memory stand-in locally, or one that fails closed. */
+  transcribe: StreamingTranscribePort
+  /** The open Copilot streams of this process and the Calls whose Transcript went quiet. */
+  copilot: CopilotRuntime
   /** Teams and Reps of an Organization, held by the core service. */
   directory: OrganizationDirectory
   /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
@@ -199,6 +222,16 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
 }
 
 /** The Bedrock model adapter, in the Region the service runs in. */
+/** AssemblyAI when keyed, an in-memory stand-in locally, otherwise one that fails closed. */
+function createTranscribe(env: Env): StreamingTranscribePort {
+  if (env.ASSEMBLYAI_API_KEY) {
+    return createAssemblyAiStreamingTranscribe({ apiKey: env.ASSEMBLYAI_API_KEY })
+  }
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryStreamingTranscribe()
+    : createUnconfiguredStreamingTranscribe()
+}
+
 function createLlm(env: Env, logger: Logger): LlmPort {
   return createBedrockLlm({ region: env.AWS_REGION, logger })
 }
@@ -215,6 +248,29 @@ function createDirectory(env: Env): OrganizationDirectory {
   return env.ENVIRONMENT === 'local'
     ? createMemoryOrganizationDirectory()
     : createUnconfiguredOrganizationDirectory()
+}
+
+/**
+ * Picks the booking gateway: core's public booking routes when a link token map is set, in memory
+ * for an unconfigured local run, and otherwise one that fails closed. Core has no route for a
+ * Prospect's contact yet, so outside `local` a booking over HTTP fails (shortcut: add the contact
+ * lookup when core serves it).
+ */
+function createBooking(env: Env): BookingGateway {
+  const tokens = env.BOOKING_LINK_TOKENS
+  if (env.CORE_INTERNAL_URL && tokens) {
+    return createCoreHttpBookingGateway({
+      baseUrl: env.CORE_INTERNAL_URL,
+      linkTokenOf: (organizationId) => tokens[organizationId],
+      contactOf: async () =>
+        env.ENVIRONMENT === 'local'
+          ? { name: 'Local Prospect', email: 'prospect@example.test', timeZone: 'UTC' }
+          : undefined,
+    })
+  }
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryBookingGateway()
+    : createUnconfiguredBookingGateway()
 }
 
 /** Picks evidence search: the Playbook over HTTP when configured, in memory only for an unconfigured local run. */
@@ -301,6 +357,8 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     agentSettings: createPostgresAgentSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
+    qualification: createPostgresQualificationStore(database.db),
+    booking: createBooking(env),
     // The Playbook's internal search route; only a local run without PLAYBOOK_INTERNAL_* gets the
     // (empty) in-memory search.
     evidence: createEvidenceSearch(env),
@@ -321,6 +379,9 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     storage: createStorage(env),
     events: createQueue(env, env.QUEUE_URL, eventRegistry),
     jobs,
+    callTurns: createPostgresCallTurnStore(database.db),
+    transcribe: createTranscribe(env),
+    copilot: createCopilotRuntime(),
     // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
     // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).
     directory: createDirectory(env),

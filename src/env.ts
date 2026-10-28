@@ -155,6 +155,23 @@ const schema = z
      */
     CORE_INTERNAL_TOKEN: z.string().min(16).max(512).optional(),
     /**
+     * JSON map of Organization id to the token of its Booking Type link in core, so the Agent can
+     * read free times and book through core's public routes. A credential: never log it.
+     * shortcut: an env map until Agent settings carry the link; unset means no booking over HTTP.
+     */
+    BOOKING_LINK_TOKENS: z
+      .string()
+      .max(8_192)
+      .transform((raw, context) => {
+        try {
+          return z.record(z.string().min(1), z.string().min(8).max(256)).parse(JSON.parse(raw))
+        } catch {
+          context.addIssue({ code: 'custom', message: 'BOOKING_LINK_TOKENS must be a JSON map' })
+          return z.NEVER
+        }
+      })
+      .optional(),
+    /**
      * The Playbook's origin for the internal Document search the Agent answers from. https outside
      * `local`. Required outside `local`; when `local` and unset, an empty in-memory search is used.
      */
@@ -182,6 +199,12 @@ const schema = z
      * `TELEPHONY_PROVIDER=twilio`; `http` is accepted only when `local`.
      */
     WEBHOOK_BASE_URL: z.url().max(2_048).optional(),
+    /**
+     * The AssemblyAI key for the Copilot's live Transcript. Without it a `local` run plays scripted
+     * in-memory speakers and any other environment reports the Transcript unavailable. A secret:
+     * never log it.
+     */
+    ASSEMBLYAI_API_KEY: z.string().min(1).max(256).optional(),
     /**
      * How often, on average, each instance purges expired Twilio rows (jittered by 20% either way).
      * It runs only when `TELEPHONY_PROVIDER=twilio`, the one case that stores them in Postgres.

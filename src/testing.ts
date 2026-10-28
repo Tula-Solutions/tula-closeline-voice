@@ -14,21 +14,28 @@ import {
   createMemoryLlm,
   createMemoryObjectStore,
   createMemoryQueue,
+  createMemoryStreamingTranscribe,
   createMemoryTelephony,
   createTestJwks,
   createTestKeyPair,
   type MemoryLlm,
   type MemoryObjectStore,
   type MemoryQueue,
+  type MemoryStreamingTranscribe,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
 import { createMemoryAgentSettingsStore } from '~/adapters/memory/agent-settings-store'
 import { createMemoryAgentTurnStore } from '~/adapters/memory/agent-turn-store'
 import {
+  createMemoryBookingGateway,
+  type MemoryBookingGateway,
+} from '~/adapters/memory/booking-gateway'
+import {
   createMemoryCallEventStore,
   type MemoryCallEventStore,
 } from '~/adapters/memory/call-event-store'
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
+import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
 import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
@@ -47,6 +54,10 @@ import {
   type MemoryOrganizationDirectory,
 } from '~/adapters/memory/organization-directory'
 import { createMemoryQualificationQuestionStore } from '~/adapters/memory/qualification-question-store'
+import {
+  createMemoryQualificationStore,
+  type MemoryQualificationStore,
+} from '~/adapters/memory/qualification-store'
 import { createMemoryRecordingStore } from '~/adapters/memory/recording-store'
 import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
@@ -59,6 +70,7 @@ import {
   type finishRecordingMessage,
   jobRegistry,
 } from '~/modules/recording/messages'
+import { createCopilotRuntime } from '~/modules/transcript/runtime'
 import { NUMBER_PROVISIONER_TIMEOUT_MS } from '~/ports/number-provisioner'
 
 /** Every key a deployed environment must set, so a test can run as any ENVIRONMENT. */
@@ -102,10 +114,13 @@ const REJECTING_VERIFIER: TokenVerifier = {
 export type TestDeps = Container & {
   clock: FixedClock
   llm: MemoryLlm
+  transcribe: MemoryStreamingTranscribe
   evidence: MemoryEvidenceSearch
   idempotency: MemoryIdempotencyStore
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
+  qualification: MemoryQualificationStore
+  booking: MemoryBookingGateway
   callEvents: MemoryCallEventStore
   calls: MemoryCallStore
   storage: MemoryObjectStore
@@ -152,6 +167,8 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     lines: createMemoryLineStore(),
     agentSettings: createMemoryAgentSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
+    qualification: createMemoryQualificationStore(),
+    booking: createMemoryBookingGateway(),
     turns: createMemoryAgentTurnStore(
       () => new Date(),
       (org, id, n) => calls.addAgentCost(org, id, n)
@@ -168,6 +185,9 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     storage: createMemoryObjectStore({ clock }),
     events: createMemoryQueue({ registry: eventRegistry, clock }),
     jobs,
+    callTurns: createMemoryCallTurnStore(),
+    transcribe: createMemoryStreamingTranscribe({ sleep: async () => undefined, random: () => 0 }),
+    copilot: createCopilotRuntime(5),
     directory: createMemoryOrganizationDirectory(),
     close: async () => undefined,
     readinessChecks: overrides.readinessChecks ?? [],

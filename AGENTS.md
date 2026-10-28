@@ -8,15 +8,15 @@ from the hub (`tula-closeline`). This file holds only what is specific to this r
 
 ## Commands
 
-| Command | Use |
-| --- | --- |
-| `bun install` | install, including the tagged `tula-closeline-*` libraries |
-| `bun run verify` | the full gate, exactly what CI runs |
-| `bun run verify:changed` | the quick gate the Stop hook runs |
-| `bun test` | tests |
+| Command                    | Use                                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`              | install, including the tagged `tula-closeline-*` libraries                                                                             |
+| `bun run verify`           | the full gate, exactly what CI runs                                                                                                    |
+| `bun run verify:changed`   | the quick gate the Stop hook runs                                                                                                      |
+| `bun test`                 | tests                                                                                                                                  |
 | `bun run test:integration` | the `*.integration.ts` suites against compose Postgres (`docker compose up -d --wait`; `POSTGRES_PORT` moves it); not part of `verify` |
-| `bun run bench` | the benchmarks and their budgets |
-| `bun run openapi` | rewrite `openapi.json` after a route or schema change |
+| `bun run bench`            | the benchmarks and their budgets                                                                                                       |
+| `bun run openapi`          | rewrite `openapi.json` after a route or schema change                                                                                  |
 
 Other scripts are in `package.json`.
 
@@ -45,6 +45,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   goes through `withOrganization` (`src/adapters/postgres/line-store.ts`). `providerSid` never
   leaves the service.
 - `src/modules/agent-settings/` is the Inbound Agent settings and Qualification questions (`GET/PUT /v1/agent/settings`, `GET/POST /v1/agent/questions`, `GET/PATCH/DELETE /v1/agent/questions/{id}`, `PUT /v1/agent/question-order`). Reads need Owner, Admin or Manager; writes need Owner or Admin. No row means the defaults, with the Agent paused. `Agent.isPaused` / `assertNotPaused` (`agent.paused`) are for the conversation engine to call before answering or calling back. Questions are one ordered list per Organization (max 50, positions 1..n); every change goes through the store's `change`, which locks per Organization, and skip logic may only name an earlier question. No setting touches the Disclosure, the recording notice or the consent gate (ADR 0003).
+- `src/modules/agent-tools/` runs the Inbound Agent's tools for a live Call: `contextFor(deps, scope)` says what the model may use (the one pending Qualification question, and the free times offered when the last Agent turn was `find_slots` or `book`); `run(deps, scope, toolCall)` runs `record_answer`, `find_slots` or `book` and returns what the Agent says (`{say, replace}`), or `null` for the other tools (`hand_off`, `end_call`, `revoke_consent` belong to other tickets). `record_answer` accepts only the pending question, parses the answer by kind (a failure re-asks), records skipped questions as `skipped`, and stores a summary (max 2000 characters) when none is left. Beside a tool call the model's own text is never spoken, only what the tool says. `book` re-reads the free times and books only one offered on the previous turn, with the idempotency key `voice-book-<callId>-<turnIndex>`; a failure is told to the Prospect with other times. The `QualificationStore` port (Postgres `voice.inquiries` / `qualification_answers`; no Inquiry for the Call means nothing is recorded, the intake ticket creates it) and the `BookingGateway` port (memory adapter, or `src/adapters/core-http/booking-gateway.ts` over core's public Booking Type link routes: 3 s per attempt, 2 jittered retries on a network error or 5xx, every failure a `BookingFailedError`) are the only ways out. Over HTTP the Prospect's contact is a fixed placeholder in `local` only, so `book` fails closed elsewhere until core has a contact lookup. Tool arguments are validated; model output is untrusted.
 - `src/modules/conversation/` is the Inbound Agent engine in text mode: `converse(deps, {organizationId, conversation: {kind: 'call'|'chat'|'try', id}, turnIndex, text})`. `turnIndex` is the Prospect turn's even index and the idempotency key (the Agent turn is `turnIndex + 1`); a retry returns the stored exchange (`replayed: true`, `toolCall: null`) and never asks the model again. Order: `assertNotPaused`, retrieve evidence through the `EvidenceSearch` port (Organization-scoped; Documents are citable, Moments are wording examples only), defer to a Rep without calling the model when fewer than `MIN_EVIDENCE_PASSAGES` (1) passages reach `MIN_EVIDENCE_SCORE` (0.5, a starting value to tune), else `LlmPort.complete` with a Zod schema (reply, cited labels, deferred, at most one tool call from the contract's `AGENT_TOOLS` with strict arguments). A reply that cites nothing, cites a passage that was not retrieved, or breaks the schema (an out-of-set tool included) is stored as a deferral. Retrieved text and the Prospect message go into delimited, escaped data sections, never into instructions. The engine validates a tool call but never runs it. `AgentTurnStore` (`voice.agent_turns` and `agent_turn_sources`) is the only way to reach the turns; the production `EvidenceSearch` is `src/adapters/playbook-http/` (the Playbook's `POST /internal/v1/playbook/search/documents`, bearer secret and `X-Organization-Id`; 2.5 s per attempt, one jittered retry on a timeout or 503, the Playbook's 504 is `server.timeout`, every other failure `server.unavailable`; no Moments until an internal route exists). `MIN_EVIDENCE_SCORE` is still untuned: it needs real Playbook scores.
 - `src/modules/call/` places and lists Calls (`POST/GET /v1/calls`, `GET /v1/calls/{id}`,
   `PUT /v1/calls/{id}/wrap-up`). `state.ts` holds the one edge table (`canTransition`): `live` is
@@ -56,6 +57,19 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   Admin all; any other Call is `call.not_found`. `Calls.end` is service-only (no route yet).
   The place-Call path is not a hot path: a Rep places a few Calls a minute and it is bound by the
   provider's latency, so it has no benchmark.
+- `src/modules/transcript/` is the Copilot live Transcript. A Rep dials with `copilot: true`; the Call
+  plays `COPILOT_DISCLOSURE_WORDING` (version 3, `aiAssisted`, no setting, ADR 0003) and only after it is
+  stored and the Call is `live` does `Transcript.start` fork both tracks (`forkTracks`) and open one
+  speech-to-text stream per track (`transcribe` port: AssemblyAI when `ASSEMBLYAI_API_KEY` is set, the
+  kit memory stand-in when `ENVIRONMENT=local`, else fails closed). A Call is a Copilot Call when its
+  stored Disclosure has `aiAssisted` and it has a Rep. Final turns are saved once each through
+  `CallTurnStore` (`voice.call_turns`, sequence per track; O(1) per turn, no hot-path benchmark).
+  `GET /v1/calls/{callId}/copilot/stream` is SSE (`copilot.status`, `transcript.turn`,
+  `transcript.unavailable`); ids are cursors `r<n>.p<m>` and `Last-Event-ID` resumes from the store.
+  A speech-to-text failure never touches the Call: it marks the Transcript unavailable and the stream
+  says so. Shortcut: open streams and the unavailable flag live in process memory (one instance,
+  `container.copilot`); move them to a column before running more than one instance. The Twilio media
+  websocket that feeds `Transcript.pushAudio` is not built yet.
 - Ports (`src/ports/`): `CallStore` (Postgres and memory; every event row is written in the same
   transaction as the change), `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
   requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
@@ -93,8 +107,8 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 `REGION`, `DATABASE_URL`, `AUTH_JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AWS_REGION`,
 `QUEUE_URL`, `JOBS_QUEUE_URL`, `PHONE_HASH_KEY`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`), and with `twilio` the keys
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
-`TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local),
-`PLAYBOOK_INTERNAL_URL` and `PLAYBOOK_INTERNAL_TOKEN` (the Playbook's origin and internal secret; same rules as the core pair), `CORE_INTERNAL_URL` and `CORE_INTERNAL_TOKEN` (core's origin and the `Authorization: Bearer` secret
+`TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local), `ASSEMBLYAI_API_KEY` (optional; live speech-to-text),
+`BOOKING_LINK_TOKENS` (a JSON map of Organization id to the token of its Booking Type link, a credential never logged; unset means no booking over HTTP, a shortcut until Agent settings carry the link), `PLAYBOOK_INTERNAL_URL` and `PLAYBOOK_INTERNAL_TOKEN` (the Playbook's origin and internal secret; same rules as the core pair), `CORE_INTERNAL_URL` and `CORE_INTERNAL_TOKEN` (core's origin and the `Authorization: Bearer` secret
 in its `INTERNAL_API_TOKENS`; set together; required outside local, where unset means an empty
 in-memory directory),
 and the purge schedule keys `TWILIO_PURGE_INTERVAL_MS` (default 900000) and
