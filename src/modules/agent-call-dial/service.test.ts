@@ -11,6 +11,7 @@ import {
   stepBody,
   unpause,
 } from '~/modules/agent-call-request/support'
+import { sweepStaleOutbound } from '~/modules/call/missed-sweep'
 import { createTestApp, newOrganizationId, type TestApp } from '~/testing'
 import * as Dial from './service'
 
@@ -79,6 +80,24 @@ describe('placing the Call', () => {
     await dial()
     expect(telephony.calls(org)).toHaveLength(1)
     expect((await stored())?.providerCallSid).toBeTruthy()
+  })
+
+  test('a hanging Contact Check fails closed within the deadline and frees the Line', async () => {
+    t.deps.numberTimeoutMs = 50
+    const answer = t.deps.contactGuard.check.bind(t.deps.contactGuard)
+    let calls = 0
+    // The first check is the recheck before the claim; the second runs inside the Line lock.
+    t.deps.contactGuard.check = (input) =>
+      ++calls === 1 ? answer(input) : new Promise(() => undefined)
+    const started = Date.now()
+    const outcome = await dial()
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(outcome.kind).not.toBe('dialing')
+    expect(telephony.calls(org)).toHaveLength(0)
+    expect((await row())?.state).toBe('ended')
+    expect((await row())?.gateCode).toBe('consent.unavailable')
+    // the Line lock is free again: a second Agent Call on it is not held up
+    await expect(dial()).resolves.toBeDefined()
   })
 
   test('a dial that Organization B asks for is gone', async () => {
@@ -285,6 +304,23 @@ describe('the ended event', () => {
       id: Dial.endedEventIdOf(agentCallId),
       type: 'voice.agent_call.ended',
     })
+  })
+})
+
+describe('the stale sweep', () => {
+  test('a dialing Agent Call whose Call never reported ends as no_answer, once, and frees the Line', async () => {
+    await Dial.dial(t.deps, org as never, agentCallId)
+    const before = sent()
+    t.deps.clock = createFixedClock(new Date(t.deps.clock.now().getTime() + 3_600_000))
+    const sweep = () =>
+      sweepStaleOutbound(t.deps, { maxOrganizations: 100, shouldStop: () => false })
+    expect(await sweep()).toBe(1)
+    expect(await sweep()).toBe(0)
+    const ended = await row()
+    expect(ended).toMatchObject({ state: 'ended', result: 'no_answer' })
+    expect(sent()).toBe(before + 1)
+    const usage = await t.deps.agentCalls.lineUsage(org, ended?.lineId as string, new Date(0))
+    expect(usage?.open).toBe(0)
   })
 })
 

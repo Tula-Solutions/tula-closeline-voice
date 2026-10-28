@@ -82,9 +82,12 @@ const settlementOf = (code: CallGateCode, at: Date): Settlement => ({
   at,
 })
 
+/** What ending a dialed Agent Call needs; the stale sweep passes the same four. */
+export type EndDeps = Pick<DialDeps, 'agentCalls' | 'calls' | 'clock' | 'events'>
+
 /** Publishes the ended event for a row that just ended. Safe to repeat: the event id is stable. */
 async function publishEnded(
-  deps: DialDeps,
+  deps: EndDeps,
   organizationId: string,
   row: StoredAgentCall,
   call: StoredCall | undefined
@@ -131,7 +134,7 @@ async function publishEnded(
  * answers `undefined` to a replay, so a repeated callback neither changes the row nor publishes.
  */
 async function conclude(
-  deps: DialDeps,
+  deps: EndDeps,
   organizationId: string,
   agentCallId: string,
   result: NonNullable<AgentCall['result']>,
@@ -158,6 +161,30 @@ async function conclude(
   })
   if (finished !== undefined) {
     await publishEnded(deps, organizationId, finished, call)
+  }
+}
+
+/**
+ * Ends the Agent Call of an outbound Call the stale sweep just failed, so it stops counting
+ * against its Line's concurrent cap. A Call that is not an Agent Call, or an Agent Call that
+ * already ended, changes nothing. shortcut: a `dialing` row with no voice Call at all (a crash
+ * between the claim and the Call insert) is not reaped; it needs a cross-Organization scan in
+ * `tula-closeline-db`.
+ */
+export async function reapFailedCall(
+  deps: EndDeps,
+  organizationId: string,
+  call: StoredCall
+): Promise<void> {
+  const row = await deps.agentCalls.byCallId(organizationId, call.id)
+  if (row !== undefined) {
+    await conclude(
+      deps,
+      organizationId,
+      row.id,
+      call.failureReason === 'no_answer' ? 'no_answer' : 'failed',
+      null
+    )
   }
 }
 
@@ -242,15 +269,23 @@ export async function dial(
       callId,
       since: new Date(now.getTime() - DAY_MS),
       contactCheck: async () => {
-        const check = await deps.contactGuard
-          .check({
-            organizationId,
-            prospectId,
-            phone,
-            channel: 'phone',
-            purpose: 'agent_initiated',
-          })
-          .catch(() => undefined)
+        // The Line row is locked while this runs, so a stalled guard must not hold it: fail closed.
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const deadline = new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), deps.numberTimeoutMs)
+        })
+        const check = await Promise.race([
+          deps.contactGuard
+            .check({
+              organizationId,
+              prospectId,
+              phone,
+              channel: 'phone',
+              purpose: 'agent_initiated',
+            })
+            .catch(() => undefined),
+          deadline,
+        ]).finally(() => clearTimeout(timer))
         if (check === undefined) {
           return settlementOf('consent.unavailable', now)
         }
