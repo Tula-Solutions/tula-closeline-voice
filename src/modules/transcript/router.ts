@@ -20,6 +20,9 @@ import * as Calls from '~/modules/call/service'
 import * as Page from '~/modules/transcript/page'
 import { MAX_TURN_PAGE, type TurnCursor } from '~/ports/call-turn-store'
 
+/** The most cards one poll sends. */
+const MAX_CARD_BATCH = 20
+
 const streamRoute = createRoute({
   method: 'get',
   path: '/calls/{callId}/copilot/stream',
@@ -27,11 +30,12 @@ const streamRoute = createRoute({
   summary: 'Stream the live Transcript of a Call',
   description:
     'Server-Sent Events: copilot.status, then transcript.turn for each final turn in order, and ' +
+    'copilot.card for each retrieval card (similar won-Deal Moments, with their evidence), and ' +
     'transcript.unavailable if speech-to-text fails (the Call goes on). A stream ends after a few ' +
     'minutes, so the token is checked again when the client reconnects with `Last-Event-ID`. Opens once the Call is ' +
     'disclosing and says waiting_for_disclosure until an AI-assisted Disclosure has played. ' +
     '`Last-Event-ID` resumes from what is stored. A Call the caller may not see, or of another ' +
-    'Organization, is call.not_found. Turn text is untrusted data.',
+    'Organization, is call.not_found. Turn and card text is untrusted data.',
   security: [{ [PUBLIC_SECURITY]: [] }],
   request: { params: copilotCallParamsSchema, headers: copilotStreamHeadersSchema },
   responses: {
@@ -78,11 +82,14 @@ const pageRoute = createRoute({
   },
 })
 
-const cursorId = (c: TurnCursor): string => `r${c.rep}.p${c.prospect}`
+const cursorId = (c: TurnCursor, cards: number): string => `r${c.rep}.p${c.prospect}.c${cards}`
 
-function parseCursor(id: string | undefined): TurnCursor {
-  const match = /^r(\d{1,9})\.p(\d{1,9})$/.exec(id ?? '')
-  return match ? { rep: Number(match[1]), prospect: Number(match[2]) } : { rep: 0, prospect: 0 }
+/** Reads `r<n>.p<m>` with an optional `.c<k>` (the last card sequence); a bad id starts over. */
+function parseCursor(id: string | undefined): TurnCursor & { cards: number } {
+  const match = /^r(\d{1,9})\.p(\d{1,9})(?:\.c(\d{1,9}))?$/.exec(id ?? '')
+  return match
+    ? { rep: Number(match[1]), prospect: Number(match[2]), cards: Number(match[3] ?? 0) }
+    : { rep: 0, prospect: 0, cards: 0 }
 }
 
 /** The live Transcript stream of a Call. Mounted behind the access-token middleware. */
@@ -119,7 +126,10 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
       })
       const send = (message: Omit<CopilotStreamMessage, 'id'>) =>
         s.write(
-          formatCopilotStreamFrame({ ...message, id: cursorId(cursor) } as CopilotStreamMessage)
+          formatCopilotStreamFrame({
+            ...message,
+            id: cursorId(cursor, cursor.cards),
+          } as CopilotStreamMessage)
         )
       let delivered = cursor.rep + cursor.prospect
       let said = ''
@@ -168,10 +178,18 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
           sentUnavailable = true
           await send({ event: 'transcript.unavailable', data: { callId, reason } } as never)
         }
-        if (state === 'ended' && turns.length === 0) {
+        // Cards come after the turns they follow, so a resumed stream never shows one early.
+        const cards = refused
+          ? []
+          : await container.copilotCards.list(org, callId, cursor.cards, MAX_CARD_BATCH)
+        for (const card of cards) {
+          cursor.cards = card.sequence
+          await send({ event: 'copilot.card', data: { card } } as never)
+        }
+        if (state === 'ended' && turns.length === 0 && cards.length === 0) {
           return
         }
-        if (turns.length < MAX_TURN_PAGE) {
+        if (turns.length < MAX_TURN_PAGE && cards.length < MAX_CARD_BATCH) {
           await Bun.sleep(container.copilot.pollMs)
         }
       }

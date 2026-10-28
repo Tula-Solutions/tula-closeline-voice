@@ -34,6 +34,8 @@ export type CallDeps = Pick<
   | 'calls'
   | 'recordings'
   | 'callTurns'
+  | 'copilotCards'
+  | 'evidence'
   | 'transcribe'
   | 'copilot'
   | 'lines'
@@ -175,7 +177,7 @@ export function reasonOf(error: unknown): VoiceCallFailureReason {
 }
 
 /** Which Reps' Calls the caller may see: `undefined` for all, otherwise the Memberships. */
-async function visibleReps(deps: CallDeps, caller: Caller): Promise<string[] | undefined> {
+export async function visibleReps(deps: CallDeps, caller: Caller): Promise<string[] | undefined> {
   requireVoiceRole(caller)
   if (isAdmin(caller)) {
     return undefined

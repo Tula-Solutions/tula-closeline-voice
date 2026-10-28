@@ -1,5 +1,11 @@
 import { createRoute, type OpenAPIHono } from '@hono/zod-openapi'
-import { handoffParamsSchema, handoffSchema } from 'tula-closeline-contract'
+import {
+  handoffContextSchema,
+  handoffPageSchema,
+  handoffParamsSchema,
+  handoffSchema,
+  listHandoffsQuerySchema,
+} from 'tula-closeline-contract'
 import type { Container } from '~/container'
 import { type AuthedEnv, callerOf } from '~/http/auth'
 import { errorResponse } from '~/http/responses'
@@ -35,12 +41,63 @@ const answerRoute = (verb: 'accept' | 'decline') =>
     },
   })
 
+const listRoute = createRoute({
+  method: 'get',
+  path: '/handoffs',
+  tags: ['handoffs'],
+  summary: 'List the Handoffs offered to the caller',
+  description:
+    'Latest first, one cursor page at a time, optionally by state. A Rep sees the Handoffs offered ' +
+    "to them, a Manager adds their Teams' Reps, an Owner or Admin sees all.",
+  security,
+  request: { query: listHandoffsQuerySchema },
+  responses: {
+    200: {
+      description: 'One page of Handoffs.',
+      content: { 'application/json': { schema: handoffPageSchema } },
+    },
+    400: errorResponse('request.invalid: a query value or the cursor is not valid.'),
+    401: errorResponse('The access token is missing, expired or not valid.'),
+    403: errorResponse('auth.forbidden: the caller may not read Handoffs.'),
+    500: errorResponse('Something went wrong on our side.'),
+  },
+})
+
+const contextRoute = createRoute({
+  method: 'get',
+  path: '/handoffs/{handoffId}',
+  tags: ['handoffs'],
+  summary: 'Read what the Rep sees before answering a Handoff',
+  description:
+    'The Prospect, the Qualification so far and the last 20 turns, with no email or number. A ' +
+    "Handoff outside the caller's view is `handoff.not_found`.",
+  security,
+  request: { params: handoffParamsSchema },
+  responses: {
+    200: {
+      description: 'The context of the Handoff.',
+      content: { 'application/json': { schema: handoffContextSchema } },
+    },
+    400: errorResponse('The Handoff id is not valid.'),
+    401: errorResponse('The access token is missing, expired or not valid.'),
+    403: errorResponse('auth.forbidden: the caller may not read Handoffs.'),
+    404: errorResponse("handoff.not_found: no such Handoff in the caller's view."),
+    500: errorResponse('Something went wrong on our side.'),
+  },
+})
+
 const accept = answerRoute('accept')
 const decline = answerRoute('decline')
 
 /** The Handoff routes of the caller's Organization. Mounted behind the access-token middleware. */
 export function createHandoffRouter(container: Container): OpenAPIHono<AuthedEnv> {
   const router = createRouter<AuthedEnv>()
+  router.openapi(listRoute, async (c) =>
+    c.json(await Handoffs.list(container, callerOf(c), c.req.valid('query')), 200)
+  )
+  router.openapi(contextRoute, async (c) =>
+    c.json(await Handoffs.context(container, callerOf(c), c.req.valid('param').handoffId), 200)
+  )
   router.openapi(accept, async (c) => {
     const { handoffId } = c.req.valid('param')
     return c.json(await Handoffs.accept(container, callerOf(c), handoffId), 200)

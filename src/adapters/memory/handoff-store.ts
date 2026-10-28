@@ -77,6 +77,26 @@ export function createMemoryHandoffStore(): HandoffStore {
       row.completedAt = at.toISOString()
       return structuredClone(row)
     },
+    async list(organizationId, query) {
+      const reps = query.repMembershipIds
+      return [...rowsOf(organizationId).values()]
+        .filter(
+          (row) =>
+            (query.state === undefined || row.state === query.state) &&
+            (reps === undefined ||
+              (row.repMembershipId !== null && reps.includes(row.repMembershipId)))
+        )
+        .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id))
+        .filter(
+          (row) =>
+            query.cursor === undefined ||
+            row.requestedAt < query.cursor.requestedAt ||
+            (row.requestedAt === query.cursor.requestedAt && row.id < query.cursor.id)
+        )
+        .slice(0, query.limit)
+        .map((row) => structuredClone(row))
+    },
+
     async noRep(organizationId, entry) {
       const handoff: Handoff = {
         id: formatId('hof', crypto.randomUUID()),
