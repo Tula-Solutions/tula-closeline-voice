@@ -18,4 +18,6 @@ export type OrganizationDirectory = {
   onlineRepsOfTeam: (organizationId: string, teamId: string) => Promise<string[]>
   /** The Membership ids of the Reps on every Team the Manager manages (at most 500). */
   teamRepsOf: (organizationId: string, managerMembershipId: string) => Promise<string[]>
+  /** The Organization's display name for the Agent's opening words, or undefined when not known. */
+  nameOf: (organizationId: string) => Promise<string | undefined>
 }

@@ -11,6 +11,7 @@ import {
   type TelephonyPort,
   TokenVerificationError,
   type TokenVerifier,
+  type TtsAudioChunk,
 } from 'tula-closeline-kit'
 import {
   createMemoryContactGuard,
@@ -89,6 +90,7 @@ import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
 import { loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { type AgentAudio, createAgentAudio } from '~/modules/agent-media/audio'
 import { idle } from '~/modules/call/service'
 import { publishOnFinal } from '~/modules/recording/jobs'
 import {
@@ -161,7 +163,9 @@ export type TestDeps = Container & {
   /** The Agent's voice: `tts` is scripted, `spoken` holds the audio chunks sent per Call id. */
   agentAudio: {
     tts: MemoryTts
-    sinkFor: (callId: string) => (chunk: { sequence: number }) => void
+    sinkFor: AgentAudio['sinkFor']
+    attach: AgentAudio['attach']
+    detach: AgentAudio['detach']
     spoken: Map<string, number[]>
   }
   events: MemoryQueue<
@@ -197,10 +201,17 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
   })
   const calls = publishOnFinal(createMemoryCallStore(), jobs, logger)
   const spoken = new Map<string, number[]>()
+  const tts = createMemoryTts({ sleep: async () => undefined, random: () => 0 })
+  const base = createAgentAudio(tts)
   const agentAudio = {
-    tts: createMemoryTts({ sleep: async () => undefined, random: () => 0 }),
-    sinkFor: (callId: string) => (chunk: { sequence: number }) => {
-      spoken.set(callId, [...(spoken.get(callId) ?? []), chunk.sequence])
+    ...base,
+    tts,
+    sinkFor: (callId: string) => {
+      const toSocket = base.sinkFor(callId)
+      return (chunk: TtsAudioChunk) => {
+        spoken.set(callId, [...(spoken.get(callId) ?? []), chunk.sequence])
+        toSocket(chunk)
+      }
     },
     spoken,
   }

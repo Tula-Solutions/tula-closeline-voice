@@ -26,8 +26,12 @@ type Row = {
   numberHash?: string
   dialedAt?: Date
   retry?: Date
+  goal: string | null
+  organizationName: string | null
 }
 
+const isDue = (call: StoredAgentCall, now: Date): boolean =>
+  call.state === 'queued' && call.retryAt !== null && new Date(call.retryAt) <= now
 const OPEN = new Set(['queued', 'dialing', 'live'])
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString('hex')
 
@@ -128,9 +132,36 @@ export function createMemoryAgentCallStore(): MemoryAgentCallStore {
         throw new AgentCallOpenError(open.call.id)
       }
       const stored = toCall(call)
-      rows.set(call.id, { call: stored, key: call.idempotencyKey })
+      rows.set(call.id, {
+        call: stored,
+        key: call.idempotencyKey,
+        goal: call.goal ?? null,
+        organizationName: call.organizationName ?? null,
+      })
       return { call: { ...stored }, created: true }
     },
+    opening: async (organizationId, id) => {
+      const row = rowsOf(organizationId).get(id)
+      return row === undefined
+        ? undefined
+        : { goal: row.goal, organizationName: row.organizationName }
+    },
+    dueOrganizations: async (now, after, limit) =>
+      [...organizations.entries()]
+        .filter(
+          ([id, rows]) =>
+            (after === null || id > after) && [...rows.values()].some((r) => isDue(r.call, now))
+        )
+        .map(([id]) => id)
+        .sort()
+        .slice(0, limit),
+    due: async (organizationId, now, limit) =>
+      all(organizationId)
+        .map((r) => r.call)
+        .filter((call) => isDue(call, now))
+        .sort((a, b) => (a.retryAt ?? '').localeCompare(b.retryAt ?? ''))
+        .slice(0, limit)
+        .map((call) => ({ ...call })),
     byKey: async (organizationId, key) => {
       const row = all(organizationId).find((r) => r.key === key)
       return row === undefined ? undefined : { ...row.call }

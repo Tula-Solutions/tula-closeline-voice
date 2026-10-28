@@ -294,6 +294,69 @@ export function agentCallStoreBehaviour(name: string, make: () => AgentCallHarne
       expect((await store.get(org, row.call.id))?.result).toBe('answered')
     })
 
+    test('opening returns the goal and name stored at request time', async () => {
+      const { store, newLine } = make()
+      const org = newOrganizationId()
+      const line = await newLine(org)
+      const withOpening = await store.insert(
+        org,
+        queued(line, { goal: 'Book a demo', organizationName: 'Acme' })
+      )
+      const without = await store.insert(org, queued(line))
+      expect(await store.opening(org, withOpening.call.id)).toEqual({
+        goal: 'Book a demo',
+        organizationName: 'Acme',
+      })
+      expect(await store.opening(org, without.call.id)).toEqual({
+        goal: null,
+        organizationName: null,
+      })
+      expect(await store.opening(newOrganizationId(), withOpening.call.id)).toBeUndefined()
+    })
+
+    test('due lists only queued rows at or past their retry time, per Organization, oldest first', async () => {
+      const { store, newLine } = make()
+      const org = newOrganizationId()
+      const other = newOrganizationId()
+      const line = await newLine(org)
+      const early = await store.insert(
+        org,
+        queued(line, { retryAt: new Date(AT.getTime() - 60_000) })
+      )
+      const ready = await store.insert(org, queued(line))
+      await store.insert(org, queued(line, { retryAt: new Date(AT.getTime() + 60_000) }))
+      const blocked = await store.insert(org, queued(line))
+      await store.settle(org, blocked.call.id, {
+        kind: 'blocked',
+        gateCode: 'agent.paused',
+        at: AT,
+      })
+      await store.insert(other, queued(await newLine(other)))
+      expect((await store.due(org, AT, 10)).map((row) => row.id)).toEqual([
+        early.call.id,
+        ready.call.id,
+      ])
+      expect(await store.due(org, AT, 1)).toHaveLength(1)
+      // A shared database may hold many other due Organizations, so page until the end.
+      const pages = async (now: Date, from: string | null = null) => {
+        const found: string[] = []
+        for (let cursor = from; ; ) {
+          const page = await store.dueOrganizations(now, cursor, 50)
+          found.push(...page)
+          cursor = page[page.length - 1] ?? null
+          if (page.length < 50 || cursor === null) {
+            return found
+          }
+        }
+      }
+      const orgs = await pages(AT)
+      expect(orgs).toContain(org)
+      expect(orgs).toContain(other)
+      expect(orgs).toEqual([...orgs].sort())
+      expect(await pages(AT, org)).not.toContain(org)
+      expect(await pages(new Date(AT.getTime() - 3_600_000))).not.toContain(org)
+    })
+
     test('Organization B cannot claim, finish or find the Call of A', async () => {
       const { store, newLine } = make()
       const a = newOrganizationId()

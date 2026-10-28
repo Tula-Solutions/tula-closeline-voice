@@ -6,6 +6,7 @@ import {
   type Clock,
   type ContactGuard,
   createAssemblyAiStreamingTranscribe,
+  createCartesiaTts,
   createHttpContactGuard,
   createLogger,
   createRemoteKeySet,
@@ -22,8 +23,6 @@ import {
   systemClock,
   type TelephonyPort,
   type TokenVerifier,
-  type TtsAudioChunk,
-  type TtsPort,
 } from 'tula-closeline-kit'
 import { createBedrockLlm, DEFAULT_BEDROCK_FAST_MODEL } from 'tula-closeline-kit/llm'
 import { createSqsQueue } from 'tula-closeline-kit/queue'
@@ -34,6 +33,7 @@ import {
   createMemoryQueue,
   createMemoryStreamingTranscribe,
   createMemoryTelephony,
+  createMemoryTts,
 } from 'tula-closeline-kit/testing'
 import { createCoreHttpBookingGateway } from '~/adapters/core-http/booking-gateway'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
@@ -76,6 +76,7 @@ import {
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { type AgentAudio, createAgentAudio } from '~/modules/agent-media/audio'
 import { publishOnFinal } from '~/modules/recording/jobs'
 import {
   type EventEnvelope,
@@ -107,13 +108,6 @@ import type { QualificationQuestionStore } from '~/ports/qualification-question-
 import type { QualificationStore } from '~/ports/qualification-store'
 import type { RecordingStore } from '~/ports/recording-store'
 import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
-
-/** What an Agent speaks with: the text-to-speech engine and where a Call's audio goes. */
-export type AgentAudio = {
-  tts: TtsPort
-  /** The audio leg of one Call, which receives the Agent's speech in order. */
-  sinkFor: (callId: string) => (chunk: TtsAudioChunk) => void
-}
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
 export type ReadinessCheck = {
@@ -306,6 +300,21 @@ function createTranscribe(env: Env): StreamingTranscribePort {
     : createUnconfiguredStreamingTranscribe()
 }
 
+/** Cartesia when keyed, the in-memory voice locally, otherwise none: a dialed Agent Call then hangs up. */
+function createAgentVoice(env: Env, logger: Logger): AgentAudio | undefined {
+  if (env.CARTESIA_API_KEY && env.CARTESIA_VOICE_ID) {
+    const voice = env.CARTESIA_VOICE_ID
+    return createAgentAudio(
+      createCartesiaTts({
+        apiKey: env.CARTESIA_API_KEY,
+        voices: { warm: voice, neutral: voice, crisp: voice },
+        logger,
+      })
+    )
+  }
+  return env.ENVIRONMENT === 'local' ? createAgentAudio(createMemoryTts()) : undefined
+}
+
 /** Voice needs no strong model: both tiers are `LLM_MODEL`, Haiku 5.5 when unset. */
 export function voiceLlmModels(env: Pick<Env, 'LLM_MODEL'>) {
   const model = env.LLM_MODEL ?? DEFAULT_BEDROCK_FAST_MODEL
@@ -467,6 +476,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     ...(options.logDestination ? { destination: options.logDestination } : {}),
   })
 
+  const agentAudio = createAgentVoice(env, logger)
   const database = createDb(env.DATABASE_URL)
   const keys = createRemoteKeySet({
     url: env.AUTH_JWKS_URL,
@@ -527,6 +537,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     callTurns: createPostgresCallTurnStore(database.db),
     copilotCards: createPostgresCopilotCardStore(database.db),
     transcribe: createTranscribe(env),
+    ...(agentAudio === undefined ? {} : { agentAudio }),
     copilot: createCopilotRuntime(),
     // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
     // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).

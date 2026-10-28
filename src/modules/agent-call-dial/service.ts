@@ -24,7 +24,8 @@ import { DEFAULT_AGENT_SETTINGS } from '~/modules/agent-settings/service'
 import * as Calls from '~/modules/call/service'
 import { phoneHash } from '~/modules/recording/finish'
 import { eventRegistry } from '~/modules/recording/messages'
-import type { Settlement, StoredAgentCall } from '~/ports/agent-call-store'
+import { mediaBase } from '~/modules/transcript/service'
+import type { AgentCallOpening, Settlement, StoredAgentCall } from '~/ports/agent-call-store'
 import { InvalidTransitionError, type StoredCall } from '~/ports/call-store'
 
 /** What the dialer needs from the container: the gate's deps, the speech loop's and the event queue. */
@@ -48,13 +49,24 @@ const MAX_DURATION_SECONDS = 1_800
 
 const DAY_MS = 86_400_000
 
-/**
- * The Agent's opening, said after the Disclosure: who it calls for, why, and whether now suits.
- * shortcut: the Organization's name and the Step's goal are not stored on the Agent Call yet, so
- * the wording is generic; upgrade when core's Organization name and the Step goal reach this service.
- */
+/** The Agent's opening when no Organization name and goal were kept with the request. */
 export const OPENING_WORDING =
   'I am calling on behalf of the team you recently heard from, with a short follow-up. Is now a good time to talk?'
+
+/**
+ * The Agent's opening, said after the Disclosure: who it calls for, why, and whether now suits.
+ * It names the Organization and the Step's goal when they were stored at request time.
+ */
+export function openingWording(opening: AgentCallOpening | undefined): string {
+  const who = opening?.organizationName ?? null
+  const goal = opening?.goal?.trim().replace(/[.!?\s]+$/, '') ?? ''
+  if (who === null && goal === '') {
+    return OPENING_WORDING
+  }
+  const from = who === null ? 'the team you recently heard from' : who
+  const why = goal === '' ? 'a short follow-up' : `the reason for my call: ${goal}`
+  return `I am calling on behalf of ${from}, with ${why}. Is now a good time to talk?`
+}
 
 /** Said when the Prospect says it is not a good time, just before the Call ends. */
 export const NOT_NOW_FAREWELL = 'No problem. We will try you another time. Goodbye.'
@@ -70,10 +82,18 @@ export const callIdOf = (agentCallId: string): VoiceCall['id'] =>
 export const endedEventIdOf = (agentCallId: string): string =>
   `evt_${new Bun.CryptoHasher('sha256').update(`voice.agent_call.ended:${agentCallId}`).digest('hex').slice(0, 32)}`
 
-/** The media stream URL the provider connects the call's audio to. */
-function streamUrlOf(deps: DialDeps, callId: string): string {
-  const base = deps.env.WEBHOOK_BASE_URL ?? 'http://localhost'
-  return `${base.replace(/^http/, 'ws')}/media/agent-calls/${callId}`
+/**
+ * The media stream URL the provider connects the call's audio to; the Organization is in the path.
+ * The `/talk` form is the stream after the Disclosure, the only one the Agent hears and speaks on.
+ */
+export function streamUrlOf(
+  deps: Pick<DialDeps, 'env'>,
+  organizationId: string,
+  callId: string,
+  talk = false
+) {
+  const base = mediaBase(deps.env).replace(/^http/, 'ws')
+  return `${base}/media/agent-calls/${organizationId}/${callId}${talk ? '/talk' : ''}`
 }
 
 const settlementOf = (code: CallGateCode, at: Date): Settlement => ({
@@ -342,7 +362,7 @@ export async function dial(
           idempotencyKey: agentCallId,
           from: line.number,
           to: phone,
-          streamUrl: streamUrlOf(deps, callId),
+          streamUrl: streamUrlOf(deps, organizationId, callId),
           detectionWindowMs: MAX_DETECTION_WINDOW_MS,
         },
         options
@@ -420,7 +440,7 @@ async function voicemail(
   await conclude(deps, organizationId, row.id, 'voicemail', null)
 }
 
-/** A human, or an unknown answerer, picked up: Disclosure first, then the opening. */
+/** A human, or an unknown answerer, picked up: the Disclosure plays first; the opening waits for the stream. */
 async function greet(
   deps: DialDeps,
   event: DialEvent,
@@ -431,7 +451,13 @@ async function greet(
   if (call.state === 'ringing') {
     await connecting(deps, organizationId, call.id)
   }
-  const outcome = await AgentCalls.goLive(deps, organizationId, call.id, event.providerCallId)
+  const outcome = await AgentCalls.goLive(
+    deps,
+    organizationId,
+    call.id,
+    event.providerCallId,
+    streamUrlOf(deps, organizationId, call.id, true)
+  )
   if (outcome.kind === 'failed') {
     await conclude(deps, organizationId, row.id, 'failed', null)
     return
@@ -440,7 +466,23 @@ async function greet(
     return
   }
   await deps.agentCalls.markLive(organizationId, row.id)
+}
+
+/**
+ * Speaks the opening once the Call is live and its media stream is up (the stream calls this).
+ * When nothing can be said (no voice engine, or it failed) the Call ends rather than sit silent.
+ */
+export async function open(
+  deps: DialDeps,
+  input: { organizationId: OrganizationId; callId: VoiceCall['id']; bargeIn?: AbortSignal }
+): Promise<{ spoken: boolean }> {
+  const { organizationId, callId } = input
+  const row = await deps.agentCalls.byCallId(organizationId, callId)
+  const call = await deps.calls.get(organizationId, callId)
   const audio = deps.agentAudio
+  if (row === undefined || call?.state !== 'live') {
+    return { spoken: false }
+  }
   const spoken =
     audio === undefined
       ? ''
@@ -449,16 +491,16 @@ async function greet(
             { ...deps, tts: audio.tts },
             organizationId,
             ((await deps.agentSettings.get(organizationId)) ?? DEFAULT_AGENT_SETTINGS).voiceStyle,
-            OPENING_WORDING,
-            audio.sinkFor(call.id),
-            undefined
+            openingWording(await deps.agentCalls.opening(organizationId, row.id)),
+            audio.sinkFor(callId),
+            input.bargeIn
           )
         ).spoken
-  if (spoken === '') {
-    // Nothing can be said (no voice engine, or it failed): hang up rather than sit silent.
-    await AgentCalls.end(deps, organizationId, outcome.call, 'agent_ended')
+  if (spoken === '' && input.bargeIn?.aborted !== true) {
+    await AgentCalls.end(deps, organizationId, call, 'agent_ended')
     await conclude(deps, organizationId, row.id, 'answered', 'agent_ended')
   }
+  return { spoken: spoken !== '' }
 }
 
 /**

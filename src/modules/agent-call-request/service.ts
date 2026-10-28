@@ -30,7 +30,14 @@ import type { ProspectContact, ProspectViewer } from '~/ports/prospect-directory
 /** What the Agent Call request and its gate need from the container. */
 export type AgentCallRequestDeps = Pick<
   Container,
-  'agentCalls' | 'prospects' | 'contactGuard' | 'lines' | 'agentSettings' | 'clock' | 'env'
+  | 'agentCalls'
+  | 'prospects'
+  | 'contactGuard'
+  | 'lines'
+  | 'agentSettings'
+  | 'clock'
+  | 'env'
+  | 'directory'
 >
 
 const HOUR_MS = 3_600_000
@@ -214,6 +221,7 @@ type RequestInput = {
   idempotencyKey: string
   prospectId: ProspectId
   lineId: LineId | null
+  goal: string | null
   source: Source
   viewer?: ProspectViewer
 }
@@ -257,6 +265,8 @@ async function request(
       campaign === null ? null : { enrollmentId: campaign.enrollmentId, stepKey: campaign.stepKey },
   })
   const now = deps.clock.now()
+  // The name is kept so the opening says it without a call to core; a missing one is spoken generically.
+  const organizationName = await deps.directory.nameOf(organizationId).catch(() => undefined)
   try {
     return await deps.agentCalls.insert(organizationId, {
       id: formatId('acl', crypto.randomUUID()),
@@ -276,6 +286,8 @@ async function request(
       retryAt:
         decision.kind === 'blocked' ? null : decision.kind === 'deferred' ? decision.retryAt : now,
       createdAt: now,
+      goal: input.goal,
+      organizationName: organizationName ?? null,
     })
   } catch (error) {
     if (error instanceof AgentCallOpenError) {
@@ -302,6 +314,7 @@ export function requestFromOutbound(
     idempotencyKey: body.idempotencyKey,
     prospectId: body.prospectId,
     lineId: body.lineId,
+    goal: body.goal ?? null,
     source: {
       kind: 'campaign_step',
       enrollmentId: body.enrollmentId,
@@ -313,7 +326,7 @@ export function requestFromOutbound(
 
 /** A Rep, Manager, Admin or Owner asks the Agent to call a Prospect they can see, now. */
 export async function requestFromRep(
-  deps: AgentCallRequestDeps & Pick<Container, 'directory'>,
+  deps: AgentCallRequestDeps,
   caller: Caller,
   idempotencyKey: string,
   body: RepAgentCallRequest
@@ -334,6 +347,7 @@ export async function requestFromRep(
     idempotencyKey,
     prospectId: body.prospectId,
     lineId: body.lineId,
+    goal: body.goal ?? null,
     source: { kind: 'rep_request', membershipId: membershipIdSchema.parse(membershipId) },
     viewer: { userId: caller.userId, role: caller.role },
   })

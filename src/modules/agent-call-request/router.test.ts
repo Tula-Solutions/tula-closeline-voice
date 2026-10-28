@@ -28,6 +28,17 @@ async function repSetup() {
 }
 
 describe('POST /internal/v1/agent-calls', () => {
+  test('stores the goal and the Organization name for the opening', async () => {
+    const { t, org, line, prospect } = await setup()
+    t.deps.directory.setName(org, 'Acme')
+    const res = await askInternal(t, org, stepBody(prospect, line))
+    expect(res.status).toBe(201)
+    expect(await t.deps.agentCalls.opening(org, res.body.id)).toEqual({
+      goal: 'Book a demo.',
+      organizationName: 'Acme',
+    })
+  })
+
   test.each([
     ['no secret', {}],
     ['a wrong secret', { authorization: 'Bearer not-the-secret-not-the-secret-0123456789' }],

@@ -2,6 +2,11 @@ import { type Container, reportSafely } from '~/container'
 import { internalErrorResponse } from '~/http/errors'
 import { resolveRequestId } from '~/http/request-id'
 import {
+  type AgentMediaContext,
+  authorizeAgentMedia,
+  createAgentMediaSession,
+} from '~/modules/agent-media/session'
+import {
   authorizeMedia,
   createMediaSession,
   type MediaContext,
@@ -14,7 +19,12 @@ type Fetcher = {
 }
 
 /** What rides on each media socket: the Call it was signed for and its session once open. */
-export type MediaSocketData = { context: MediaContext; session?: MediaSession }
+export type MediaSocketData = {
+  context: MediaContext
+  /** Set on an Agent Call's socket, which `context` then repeats. */
+  agent?: AgentMediaContext
+  session?: MediaSession
+}
 
 /** The largest media frame accepted; the provider's are a few hundred bytes. */
 export const MEDIA_MAX_FRAME_BYTES = 16_384
@@ -50,6 +60,15 @@ export function serveOptions(container: Container, app: Fetcher) {
         requestIP: (request: Request) => { address: string } | null
       }
     ): Promise<Response | undefined> => {
+      const agent = await authorizeAgentMedia(container, request)
+      if (agent instanceof Response) {
+        return agent
+      }
+      if (agent !== undefined) {
+        return server.upgrade(request, { data: { context: agent, agent } })
+          ? undefined
+          : new Response(null, { status: 400 })
+      }
       const media = await authorizeMedia(container, request)
       if (media === undefined) {
         return app.fetch(request, server)
@@ -65,7 +84,11 @@ export function serveOptions(container: Container, app: Fetcher) {
       maxPayloadLength: MEDIA_MAX_FRAME_BYTES,
       idleTimeout: MEDIA_IDLE_SECONDS,
       open: (ws: Bun.ServerWebSocket<MediaSocketData>) => {
-        ws.data.session = createMediaSession(container, ws.data.context, ws)
+        const { agent, context } = ws.data
+        ws.data.session =
+          agent === undefined
+            ? createMediaSession(container, context, ws)
+            : createAgentMediaSession(container, agent, ws)
       },
       message: async (ws: Bun.ServerWebSocket<MediaSocketData>, data: string | Buffer) => {
         await ws.data.session?.message(data)

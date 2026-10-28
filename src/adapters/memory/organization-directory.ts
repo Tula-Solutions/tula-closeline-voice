@@ -17,6 +17,8 @@ export type MemoryOrganizationDirectory = OrganizationDirectory & {
   addTeamReps: (organizationId: string, managerMembershipId: string, repIds: string[]) => void
   /** Declares which Reps of a Team are online to take Calls. */
   setOnlineReps: (organizationId: string, teamId: string, repIds: string[]) => void
+  /** Declares the Organization's display name. */
+  setName: (organizationId: string, name: string) => void
 }
 
 /** A directory held in memory, for tests and local runs. */
@@ -27,9 +29,12 @@ export function createMemoryOrganizationDirectory(): MemoryOrganizationDirectory
   const memberships = new Map<string, string>()
   const teamReps = new Map<string, string[]>()
   const online = new Map<string, string[]>()
+  const names = new Map<string, string>()
   const key = (organizationId: string, id: string) => `${organizationId}/${id}`
 
   return {
+    setName: (organizationId, name) => void names.set(organizationId, name),
+    nameOf: async (organizationId) => names.get(organizationId),
     setOnlineReps: (organizationId, teamId, repIds) =>
       void online.set(key(organizationId, teamId), [...repIds]),
     onlineRepsOfTeam: async (organizationId, teamId) => [
