@@ -60,3 +60,44 @@ test('a Line of another Organization or one that does not exist has no usage', a
   expect(await store.lineUsage(b, line, since)).toBeUndefined()
   expect(await store.lineUsage(a, formatId('line', crypto.randomUUID()), since)).toBeUndefined()
 })
+
+test('concurrent claims on one Line never exceed the concurrent cap', async () => {
+  const org = newOrganizationId()
+  const line = await newLine(org)
+  const at = new Date()
+  const ids: string[] = []
+  for (let n = 0; n < 8; n += 1) {
+    const row = await store.insert(org, {
+      id: formatId('acl', crypto.randomUUID()),
+      idempotencyKey: `race-${crypto.randomUUID()}`,
+      source: 'rep_request',
+      prospectId: formatId('prs', crypto.randomUUID()),
+      lineId: line,
+      enrollmentId: null,
+      stepKey: null,
+      requestedByMembershipId: formatId('mem', crypto.randomUUID()),
+      attempt: 1,
+      state: 'queued',
+      result: null,
+      gateCode: null,
+      retryAt: at,
+      createdAt: new Date(at.getTime() - 1000),
+    })
+    ids.push(row.call.id)
+  }
+  const outcomes = await Promise.all(
+    ids.map((id, n) =>
+      store.claimDial(org, id, {
+        at,
+        numberHash: new Uint8Array(32).fill(n + 1),
+        callId: formatId('call', crypto.randomUUID()),
+        since: new Date(at.getTime() - 86_400_000),
+        contactCheck: async () => undefined,
+      })
+    )
+  )
+  const claimed = outcomes.filter((o) => o.kind === 'claimed').length
+  expect(claimed).toBe(3)
+  expect(outcomes.filter((o) => o.kind === 'capped').length).toBe(5)
+  expect((await store.lineUsage(org, line, new Date(0)))?.open).toBe(3)
+})

@@ -138,6 +138,23 @@ describe('the memory Call store', () => {
     expect((await store.insertInbound(OTHER_ORG, input)).created).toBe(true)
   })
 
+  it('keeps one Agent outbound Call per id, without a Rep, and per Organization', async () => {
+    const store = createMemoryCallStore()
+    const input = {
+      id: formatId('call', crypto.randomUUID()),
+      lineId: formatId('line', crypto.randomUUID()),
+      prospectId: formatId('prs', crypto.randomUUID()),
+      prospectNumber: '+14155550100',
+      createdAt: T0,
+    }
+    const first = await store.insertAgentOutbound(ORG, input)
+    const again = await store.insertAgentOutbound(ORG, input)
+    expect([first.created, again.created]).toEqual([true, false])
+    expect(first.call).toMatchObject({ direction: 'outbound', state: 'ringing' })
+    expect(first.call.repMembershipId).toBeNull()
+    expect(await store.get(OTHER_ORG, input.id)).toBeUndefined()
+  })
+
   it('lets exactly one of two claims of a ringing inbound Call win', async () => {
     const store = createMemoryCallStore()
     const { call } = await store.insertInbound(ORG, {

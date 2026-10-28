@@ -5,6 +5,9 @@ import { voiceAgentCalls, voiceLines } from 'tula-closeline-db/schema'
 import {
   AgentCallOpenError,
   type AgentCallStore,
+  type ClaimOutcome,
+  type LineUsage,
+  lineIsFull,
   type StoredAgentCall,
 } from '~/ports/agent-call-store'
 
@@ -71,6 +74,41 @@ export function createPostgresAgentCallStore(db: Database): AgentCallStore {
         inArray(voiceAgentCalls.state, [...OPEN_STATES])
       )
     )
+
+  type Tx = Parameters<Parameters<typeof withOrganization>[2]>[0]
+  /** A Line's caps and use, counted inside the caller's transaction. */
+  const usageIn = async (
+    tx: Tx,
+    organizationId: string,
+    lineId: string,
+    since: Date
+  ): Promise<LineUsage | undefined> => {
+    const [line] = await tx
+      .select({
+        maxConcurrentAgentCalls: voiceLines.maxConcurrentAgentCalls,
+        dailyAgentDialCap: voiceLines.dailyAgentDialCap,
+      })
+      .from(voiceLines)
+      .where(and(eq(voiceLines.organizationId, organizationId), eq(voiceLines.id, lineId)))
+      .limit(1)
+    if (line === undefined) {
+      return undefined
+    }
+    const [use] = await tx
+      .select({
+        open: sql<number>`count(*) filter (where ${voiceAgentCalls.state} in ('dialing', 'live'))::int`,
+        dials: sql<number>`count(*) filter (where ${voiceAgentCalls.dialedAt} >= ${since})::int`,
+        oldest: sql<Date | null>`min(${voiceAgentCalls.dialedAt}) filter (where ${voiceAgentCalls.dialedAt} >= ${since})`,
+      })
+      .from(voiceAgentCalls)
+      .where(and(inOrg(organizationId), eq(voiceAgentCalls.lineId, lineId)))
+    return {
+      ...line,
+      open: use?.open ?? 0,
+      dials: use?.dials ?? 0,
+      oldestDialAt: use?.oldest ? new Date(use.oldest) : null,
+    }
+  }
 
   return {
     byKey,
@@ -165,35 +203,93 @@ export function createPostgresAgentCallStore(db: Database): AgentCallStore {
       return { dialed: row?.dialed ?? 0, answered: row?.answered ?? false }
     },
 
-    async lineUsage(organizationId, lineId, since) {
-      return withOrganization(db, organizationId, async (tx) => {
-        const [line] = await tx
-          .select({
-            maxConcurrentAgentCalls: voiceLines.maxConcurrentAgentCalls,
-            dailyAgentDialCap: voiceLines.dailyAgentDialCap,
-          })
-          .from(voiceLines)
-          .where(and(eq(voiceLines.organizationId, organizationId), eq(voiceLines.id, lineId)))
-          .limit(1)
-        if (line === undefined) {
-          return undefined
-        }
-        const [use] = await tx
-          .select({
-            open: sql<number>`count(*) filter (where ${voiceAgentCalls.state} in ('dialing', 'live'))::int`,
-            dials: sql<number>`count(*) filter (where ${voiceAgentCalls.dialedAt} >= ${since})::int`,
-            oldest: sql<Date | null>`min(${voiceAgentCalls.dialedAt}) filter (where ${voiceAgentCalls.dialedAt} >= ${since})`,
-          })
+    lineUsage: (organizationId, lineId, since) =>
+      withOrganization(db, organizationId, (tx) => usageIn(tx, organizationId, lineId, since)),
+
+    async claimDial(organizationId, id, claim) {
+      return withOrganization(db, organizationId, async (tx): Promise<ClaimOutcome> => {
+        const [row] = await tx
+          .select()
           .from(voiceAgentCalls)
-          .where(and(inOrg(organizationId), eq(voiceAgentCalls.lineId, lineId)))
-        return {
-          ...line,
-          open: use?.open ?? 0,
-          dials: use?.dials ?? 0,
-          oldestDialAt: use?.oldest ? new Date(use.oldest) : null,
+          .where(and(inOrg(organizationId), eq(voiceAgentCalls.id, id)))
+          .for('update')
+        if (row === undefined || row.state !== 'queued' || row.lineId === null) {
+          return { kind: 'gone' }
         }
+        // The Line row is the lock every claim on this Line queues behind.
+        await tx
+          .select({ id: voiceLines.id })
+          .from(voiceLines)
+          .where(and(eq(voiceLines.organizationId, organizationId), eq(voiceLines.id, row.lineId)))
+          .for('update')
+        const usage = await usageIn(tx, organizationId, row.lineId, claim.since)
+        if (usage === undefined || lineIsFull(usage)) {
+          return usage === undefined ? { kind: 'gone' } : { kind: 'capped', usage }
+        }
+        const refusal = await claim.contactCheck()
+        if (refusal !== undefined) {
+          return { kind: 'refused', settlement: refusal }
+        }
+        const [claimed] = await tx
+          .update(voiceAgentCalls)
+          .set({
+            state: 'dialing',
+            dialedAt: claim.at,
+            numberHash: Buffer.from(claim.numberHash),
+            callId: claim.callId,
+            retryAt: null,
+            gateCode: null,
+          })
+          .where(and(inOrg(organizationId), eq(voiceAgentCalls.id, id)))
+          .returning()
+        return claimed === undefined
+          ? { kind: 'gone' }
+          : { kind: 'claimed', call: toStored(claimed) }
       })
     },
+
+    async markLive(organizationId, id) {
+      const [row] = await withOrganization(db, organizationId, (tx) =>
+        tx
+          .update(voiceAgentCalls)
+          .set({ state: 'live' })
+          .where(
+            and(
+              inOrg(organizationId),
+              eq(voiceAgentCalls.id, id),
+              eq(voiceAgentCalls.state, 'dialing')
+            )
+          )
+          .returning()
+      )
+      return row === undefined ? undefined : toStored(row)
+    },
+
+    async finish(organizationId, id, finish) {
+      const [row] = await withOrganization(db, organizationId, (tx) =>
+        tx
+          .update(voiceAgentCalls)
+          .set({
+            state: 'ended',
+            result: finish.result,
+            endReason: finish.endReason,
+            durationSeconds: finish.durationSeconds,
+            endedAt: finish.at,
+          })
+          .where(
+            and(
+              inOrg(organizationId),
+              eq(voiceAgentCalls.id, id),
+              inArray(voiceAgentCalls.state, ['dialing', 'live'])
+            )
+          )
+          .returning()
+      )
+      return row === undefined ? undefined : toStored(row)
+    },
+
+    byCallId: (organizationId, callId) =>
+      first(organizationId, and(inOrg(organizationId), eq(voiceAgentCalls.callId, callId))),
 
     async settle(organizationId, id, settlement) {
       const [row] = await withOrganization(db, organizationId, (tx) =>

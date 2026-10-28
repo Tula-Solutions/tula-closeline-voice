@@ -101,6 +101,45 @@ export function createMemoryCallStore(): MemoryCallStore {
       return copy(call)
     },
 
+    async insertAgentOutbound(organizationId, input) {
+      const rows = rowsOf(organizationId)
+      const existing = rows.get(input.id)
+      if (existing !== undefined) {
+        return { call: copy(existing.call), created: false }
+      }
+      const call: StoredCall = {
+        id: input.id,
+        direction: 'outbound',
+        state: 'ringing',
+        lineId: input.lineId,
+        repMembershipId: null,
+        prospectId: input.prospectId,
+        prospectNumber: input.prospectNumber,
+        disclosure: { wordingVersion: null, playedAt: null, aiAssisted: false },
+        createdAt: input.createdAt.toISOString(),
+        answeredAt: null,
+        endedAt: null,
+        durationSeconds: null,
+        endedBy: null,
+        failureReason: null,
+        dealId: null,
+        note: null,
+        recordingState: 'none',
+        transcriptState: 'pending',
+        providerCallSid: null,
+        endReason: null,
+        agentCostMicroCents: 0,
+        copilot: false,
+        transcriptUnavailable: null,
+      }
+      rows.set(call.id, {
+        call,
+        key: undefined,
+        log: [{ kind: 'state_changed', fromState: null, toState: 'ringing', at: input.createdAt }],
+      })
+      return { call: copy(call), created: true }
+    },
+
     async insertInbound(organizationId, input) {
       const rows = rowsOf(organizationId)
       const existing = [...rows.values()].find(

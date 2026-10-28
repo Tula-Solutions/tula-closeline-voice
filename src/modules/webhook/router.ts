@@ -38,6 +38,10 @@ const describeRoute = (path: string, summary: string) =>
   })
 
 const status = describeRoute('/webhooks/twilio/status', 'Receive a call status callback')
+const detection = describeRoute(
+  '/webhooks/twilio/detection',
+  'Receive an answering-machine detection callback'
+)
 const recording = describeRoute('/webhooks/twilio/recording', 'Receive a recording status callback')
 
 const inbound = createRoute({
@@ -87,6 +91,7 @@ async function receiveFrom(
 export function createWebhookRouter(container: Container): OpenAPIHono<AppEnv> {
   const router = createRouter<AppEnv>()
   router.openapi(status, async (c) => c.json(await receiveFrom(container, 'status', c), 200))
+  router.openapi(detection, async (c) => c.json(await receiveFrom(container, 'detection', c), 200))
   router.openapi(recording, async (c) => c.json(await receiveFrom(container, 'recording', c), 200))
   router.openapi(inbound, async (c) => {
     await Webhooks.receiveInbound(container, await rawCallback(c))

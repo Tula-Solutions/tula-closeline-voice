@@ -50,6 +50,15 @@ export type NewInboundCall = {
   createdAt: Date
 }
 
+/** What the store needs to create an outbound Call the Agent places; it starts `ringing`. */
+export type NewAgentOutboundCall = {
+  id: VoiceCall['id']
+  lineId: VoiceCall['lineId']
+  prospectId: NonNullable<VoiceCall['prospectId']>
+  prospectNumber: string
+  createdAt: Date
+}
+
 /** A page request. `repMembershipIds` is the visibility filter: `[]` matches nothing. */
 export type CallListQuery = {
   cursor?: CallCursor
@@ -121,6 +130,14 @@ export type CallStore = {
   insertInbound: (
     organizationId: string,
     call: NewInboundCall
+  ) => Promise<{ call: StoredCall; created: boolean }>
+  /**
+   * Creates the outbound Call of an Agent Call `ringing`, held by no Rep, once per id: a repeat
+   * returns the Call the first insert made with `created: false`.
+   */
+  insertAgentOutbound: (
+    organizationId: string,
+    call: NewAgentOutboundCall
   ) => Promise<{ call: StoredCall; created: boolean }>
   /**
    * Gives a `ringing` inbound Call to the Rep, moving it to `connecting`, in one conditional
