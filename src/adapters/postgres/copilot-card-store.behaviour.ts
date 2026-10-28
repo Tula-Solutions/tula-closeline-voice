@@ -57,6 +57,33 @@ export function copilotCardStoreBehaviour(name: string, make: () => CardHarness)
       expect(await store.list(org, call, 0, 2)).toHaveLength(2)
     })
 
+    test('marks a card to an end state, once, in its own Organization and Call only', async () => {
+      const { store, newCall } = make()
+      const org = newOrganizationId()
+      const call = await newCall(org)
+      const other = await newCall(org)
+      const a = await store.append(org, call, card(at(0)))
+      const first = await store.mark(org, call, a.id, { rating: 'useful', pinned: true })
+      expect(first?.changed).toBe(true)
+      expect(first?.card).toMatchObject({ rating: 'useful', pinned: true, dismissed: false })
+      expect((await store.mark(org, call, a.id, { rating: 'useful', pinned: true }))?.changed).toBe(
+        false
+      )
+      const dismissed = await store.mark(org, call, a.id, { dismissed: true })
+      expect(dismissed?.card).toMatchObject({ rating: 'useful', pinned: false, dismissed: true })
+      expect(await store.mark(org, other, a.id, { rating: null })).toBeUndefined()
+      expect(await store.mark(newOrganizationId(), call, a.id, { rating: null })).toBeUndefined()
+    })
+
+    test('lists only the asked kind', async () => {
+      const { store, newCall } = make()
+      const org = newOrganizationId()
+      const call = await newCall(org)
+      await store.append(org, call, card(at(0)))
+      expect(await store.list(org, call, 0, 10, 'objection')).toEqual([])
+      expect(await store.list(org, call, 0, 10, 'similar_moment')).toHaveLength(1)
+    })
+
     test('tallies the count and the cards shown since a time', async () => {
       const { store, newCall } = make()
       const org = newOrganizationId()

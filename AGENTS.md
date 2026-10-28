@@ -163,6 +163,7 @@ local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_
   valid card. The SSE stream then sends `copilot.card_updated` once (watched for 10 s after a send). The Moment key is
   its `callId`. Over HTTP the Playbook has no `/internal/v1/playbook/search/moments` route yet (hub #412),
   so there no card is shown until it exists; the quiet reasons are not emitted yet.
+  `GET /v1/calls/{callId}/copilot/cards` (cursor on `sequence`, optional `kind`) follows the Calls rule (`visibleReps`); `PATCH .../cards/{cardId}` rates, dismisses or pins by end state and is for the Rep who took the Call only (anyone else: `call.not_found`); a repeat publishes no second `voice.copilot.card_rated`.
 
 ## Hot paths
 

@@ -5,6 +5,7 @@ import { voiceCopilotCards } from 'tula-closeline-db/schema'
 import {
   type CopilotCardStore,
   MAX_CARD_PAGE,
+  marked,
   type SimilarMomentCard,
 } from '~/ports/copilot-card-store'
 
@@ -102,7 +103,40 @@ export function createPostgresCopilotCardStore(db: Database): CopilotCardStore {
         return row === undefined ? undefined : toCard(row)
       })
     },
-    async list(organizationId, callId, afterSequence, limit) {
+    async mark(organizationId, callId, cardId, mark) {
+      return withOrganization(db, organizationId, async (tx) => {
+        // Locked, so two identical requests at once change the card once and only one says so.
+        const [row] = await tx
+          .select()
+          .from(voiceCopilotCards)
+          .where(
+            and(
+              eq(voiceCopilotCards.organizationId, organizationId),
+              eq(voiceCopilotCards.callId, callId),
+              eq(voiceCopilotCards.id, cardId)
+            )
+          )
+          .for('update')
+        if (row === undefined) {
+          return undefined
+        }
+        const next = marked(toCard(row), mark)
+        if (
+          next.rating === row.rating &&
+          next.dismissed === row.dismissed &&
+          next.pinned === row.pinned
+        ) {
+          return { card: toCard(row), changed: false }
+        }
+        const [updated] = await tx
+          .update(voiceCopilotCards)
+          .set(next)
+          .where(eq(voiceCopilotCards.id, cardId))
+          .returning()
+        return updated === undefined ? undefined : { card: toCard(updated), changed: true }
+      })
+    },
+    async list(organizationId, callId, afterSequence, limit, kind) {
       const size = Math.min(Math.max(limit, 1), MAX_CARD_PAGE)
       return withOrganization(db, organizationId, async (tx) => {
         const rows = await tx
@@ -112,7 +146,8 @@ export function createPostgresCopilotCardStore(db: Database): CopilotCardStore {
             and(
               eq(voiceCopilotCards.organizationId, organizationId),
               eq(voiceCopilotCards.callId, callId),
-              gt(voiceCopilotCards.sequence, afterSequence)
+              gt(voiceCopilotCards.sequence, afterSequence),
+              kind === undefined ? undefined : eq(voiceCopilotCards.kind, kind)
             )
           )
           .orderBy(asc(voiceCopilotCards.sequence))

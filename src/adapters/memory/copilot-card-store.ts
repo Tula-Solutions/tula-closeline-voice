@@ -1,5 +1,5 @@
 import { type CopilotCard, type CopilotCardId, formatId } from 'tula-closeline-contract'
-import { type CopilotCardStore, MAX_CARD_PAGE } from '~/ports/copilot-card-store'
+import { type CopilotCardStore, MAX_CARD_PAGE, marked } from '~/ports/copilot-card-store'
 
 /** An in-memory {@link CopilotCardStore} for tests and local runs. */
 export function createMemoryCopilotCardStore(): CopilotCardStore {
@@ -39,11 +39,27 @@ export function createMemoryCopilotCardStore(): CopilotCardStore {
       cards[at] = upgraded
       return structuredClone(upgraded)
     },
-    async list(organizationId, callId, afterSequence, limit) {
+    async mark(organizationId, callId, cardId, mark) {
+      const cards = byCall.get(keyOf(organizationId, callId)) ?? []
+      const at = cards.findIndex((card) => card.id === cardId)
+      const old = cards[at]
+      if (old === undefined) {
+        return undefined
+      }
+      const next = { ...old, ...marked(old, mark) } as CopilotCard
+      cards[at] = next
+      return {
+        card: structuredClone(next),
+        changed: JSON.stringify(next) !== JSON.stringify(old),
+      }
+    },
+    async list(organizationId, callId, afterSequence, limit, kind) {
       const size = Math.min(Math.max(limit, 1), MAX_CARD_PAGE)
       return structuredClone(
         (byCall.get(keyOf(organizationId, callId)) ?? [])
-          .filter((card) => card.sequence > afterSequence)
+          .filter(
+            (card) => card.sequence > afterSequence && (kind === undefined || card.kind === kind)
+          )
           .slice(0, size)
       )
     },

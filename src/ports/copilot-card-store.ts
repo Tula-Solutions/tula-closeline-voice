@@ -20,6 +20,24 @@ export type Composed = Pick<SimilarMomentCard, 'citedMoments' | 'quotes'> &
     | { kind: 'next_step'; nextStep: string }
   )
 
+/** What a Rep asks to change on a card: the end state wanted. A field left out stays as it is. */
+export type CardMark = { rating?: CopilotCard['rating']; dismissed?: boolean; pinned?: boolean }
+
+/**
+ * The card's rating, dismissal and pin after `mark`. Dismissing clears the pin and pinning clears
+ * the dismissal.
+ */
+export function marked(
+  card: Pick<CopilotCard, 'rating' | 'dismissed' | 'pinned'>,
+  mark: CardMark
+): Pick<CopilotCard, 'rating' | 'dismissed' | 'pinned'> {
+  return {
+    rating: mark.rating === undefined ? card.rating : mark.rating,
+    dismissed: mark.dismissed ?? (mark.pinned === true ? false : card.dismissed),
+    pinned: mark.pinned ?? (mark.dismissed === true ? false : card.pinned),
+  }
+}
+
 /** The most cards one `list` call returns. */
 export const MAX_CARD_PAGE = 60
 
@@ -44,8 +62,19 @@ export type CopilotCardStore = {
     organizationId: string,
     callId: string,
     afterSequence: number,
-    limit: number
+    limit: number,
+    kind?: CopilotCard['kind']
   ) => Promise<CopilotCard[]>
+  /**
+   * Sets the card's rating, dismissal and pin to the end state {@link marked} gives. `changed` is
+   * false when the card already was in that state. Undefined when the Call has no such card.
+   */
+  mark: (
+    organizationId: string,
+    callId: string,
+    cardId: string,
+    mark: CardMark
+  ) => Promise<{ card: CopilotCard; changed: boolean } | undefined>
   /**
    * Turns the Call's retrieval card `cardId` into the composed card, in place (same id, sequence and
    * time). It returns the card whole, or undefined when there is no such retrieval card (already
