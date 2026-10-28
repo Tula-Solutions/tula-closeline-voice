@@ -163,7 +163,7 @@ const hangUp = createRoute({
   summary: 'Hang up a Call',
   description:
     'The Rep on the Call (or an Owner or Admin) ends it at the provider; a `live` Call becomes ' +
-    '`ended`, by the Rep. A Call that is already over is returned as it is.',
+    '`ended`, by the Rep. A Call that is not live is returned as it is.',
   security,
   request: { params: voiceCallParamsSchema },
   responses: {

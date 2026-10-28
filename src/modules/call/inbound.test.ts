@@ -327,6 +327,21 @@ describe('hanging up from the softphone', () => {
     expect((again.body as CallBody).state).toBe('ended')
   })
 
+  it('leaves a Call that is not live alone: no provider hang-up, state unchanged', async () => {
+    const rep = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    const [call] = await callsOf()
+    const before = telephony.operations.filter((entry) => entry.operation === 'hangUp').length
+
+    const res = await hangup(rep.identity, call?.id as string)
+    expect(res.status).toBe(200)
+    expect((res.body as CallBody).state).toBe('ringing')
+    expect(telephony.operations.filter((entry) => entry.operation === 'hangUp')).toHaveLength(
+      before
+    )
+  })
+
   it('is call.not_found for another Rep and for another Organization', async () => {
     const rep = partyIn(organizationId)
     const other = partyIn(organizationId)

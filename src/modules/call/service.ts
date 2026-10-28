@@ -772,8 +772,8 @@ export async function answer(
 /**
  * The Rep hangs up from the softphone: the provider call is ended, then a `live` Call is recorded
  * `ended` by the Rep. Only the Rep on the Call (or an Owner or Admin) may; any other Call is
- * `call.not_found`. A Call that is already over is returned as it is, so a repeat is safe. A Call
- * not yet live is left for the provider's callback to settle (no-answer, hang-up while ringing).
+ * `call.not_found`. A Call that is not live (over, or still ringing) is returned as it is, so a repeat is safe;
+ * a Call not yet live is left for the provider's callback to settle (no-answer, caller hang-up).
  */
 export async function hangUp(
   deps: CallDeps,
@@ -789,7 +789,7 @@ export async function hangUp(
   ) {
     throw domainError(SALES_HISTORY_ERRORS['call.not_found'])
   }
-  if (['ended', 'failed', 'missed'].includes(stored.state) || stored.providerCallSid === null) {
+  if (stored.state !== 'live' || stored.providerCallSid === null) {
     return toCall(stored)
   }
   const providerCallId = stored.providerCallSid
