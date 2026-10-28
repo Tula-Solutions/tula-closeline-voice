@@ -22,6 +22,7 @@ test('the app serves its OpenAPI document describing every route and the error b
   expect(Object.keys(document.paths).sort()).toEqual([
     '/healthz',
     '/internal/v1/agent-calls',
+    '/internal/v1/agent-calls/{id}/dial',
     '/internal/v1/calls/{callId}/recording',
     '/internal/v1/calls/{callId}/turns',
     '/readyz',
@@ -50,6 +51,7 @@ test('the app serves its OpenAPI document describing every route and the error b
     '/v1/public/chat/sessions/{sessionToken}/messages',
     '/v1/public/chat/{key}/sessions',
     '/v1/softphone/token',
+    '/webhooks/twilio/detection',
     '/webhooks/twilio/inbound',
     '/webhooks/twilio/recording',
     '/webhooks/twilio/status',

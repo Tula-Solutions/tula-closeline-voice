@@ -3,20 +3,22 @@ import { MAX_WEBHOOK_BODY_BYTES } from 'tula-closeline-kit'
 import { z } from 'zod'
 import type { Container } from '~/container'
 import { domainError } from '~/http/domain-error'
+import * as AgentCallDial from '~/modules/agent-call-dial/service'
 import type { CallDeps } from '~/modules/call/service'
 import * as Calls from '~/modules/call/service'
 import { enqueueFinish } from '~/modules/recording/jobs'
-import { mapRecordingCallback, mapStatusCallback } from './mapping'
+import { mapDetectionCallback, mapRecordingCallback, mapStatusCallback } from './mapping'
 
 /** What the webhook service needs from the container. */
 export type WebhookDeps = Pick<
   Container,
   'telephony' | 'callEvents' | 'clock' | 'logger' | 'env' | 'jobs'
 > &
-  CallDeps
+  CallDeps &
+  AgentCallDial.DialDeps
 
 /** Which of the provider's callbacks arrived. */
-export type CallbackKind = 'status' | 'recording'
+export type CallbackKind = 'status' | 'recording' | 'detection'
 
 /** A callback exactly as it arrived; the body is untrusted until its signature has been checked. */
 export type RawCallback = {
@@ -120,7 +122,12 @@ export async function receive(
   }
   const form = new URLSearchParams(callback.body)
   const now = deps.clock.now()
-  const mapped = (kind === 'status' ? mapStatusCallback : mapRecordingCallback)(form, now)
+  const mappers = {
+    status: mapStatusCallback,
+    recording: mapRecordingCallback,
+    detection: mapDetectionCallback,
+  }
+  const mapped = mappers[kind](form, now)
   if (mapped.kind === 'invalid') {
     throw domainError(ERRORS['request.invalid'])
   }
@@ -137,7 +144,20 @@ export async function receive(
   if (result === 'unknown_call') {
     throw domainError(VOICE_ERRORS['call.provider_call_not_found'])
   }
-  if (kind === 'status' && mapped.type !== undefined) {
+  const providerCallId = form.get('CallSid')
+  const stored = await deps.calls.get(query.data.organizationId, query.data.callId)
+  if (stored?.direction === 'outbound' && stored.repMembershipId === null) {
+    // An Agent's Call: the dialer decides, not the Rep's setup. Also on a repeat, as below.
+    if (kind !== 'recording' && mapped.type !== undefined && providerCallId) {
+      await AgentCallDial.onEvent(deps, {
+        organizationId: query.data.organizationId,
+        callId: query.data.callId,
+        providerCallId,
+        type: mapped.type,
+        ...(mapped.answeredBy ? { answeredBy: mapped.answeredBy } : {}),
+      })
+    }
+  } else if (kind === 'status' && mapped.type !== undefined) {
     // Also on a repeat: the first delivery may have logged the event and then failed to act on it,
     // and acting twice is safe (only the first `ringing` to `connecting` move starts the setup).
     await Calls.onProviderStatus(deps, query.data.organizationId, query.data.callId, mapped.type)

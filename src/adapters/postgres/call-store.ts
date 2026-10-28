@@ -182,6 +182,40 @@ export function createPostgresCallStore(db: Database): CallStore {
       })
     },
 
+    async insertAgentOutbound(organizationId, call) {
+      return withOrganization(db, organizationId, async (tx) => {
+        const [row] = await tx
+          .insert(voiceCalls)
+          .values({
+            id: call.id,
+            organizationId,
+            direction: 'outbound',
+            state: 'ringing',
+            lineId: call.lineId,
+            repMembershipId: null,
+            prospectId: call.prospectId,
+            prospectNumber: call.prospectNumber,
+            createdAt: call.createdAt,
+          })
+          .onConflictDoNothing({ target: [voiceCalls.organizationId, voiceCalls.id] })
+          .returning()
+        if (row === undefined) {
+          const [existing] = await tx.select().from(voiceCalls).where(one(organizationId, call.id))
+          if (existing === undefined) {
+            throw new Error('insert conflicted but found no Call')
+          }
+          return { call: toStored(existing), created: false }
+        }
+        await log(tx, organizationId, call.id, {
+          kind: 'state_changed',
+          fromState: null,
+          toState: 'ringing',
+          occurredAt: call.createdAt,
+        })
+        return { call: toStored(row), created: true }
+      })
+    },
+
     async claimInbound(organizationId, id, repMembershipId, at) {
       return withOrganization(db, organizationId, async (tx) => {
         // One conditional update decides the race: only one statement finds the row `ringing`.

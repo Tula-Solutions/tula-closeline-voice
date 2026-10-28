@@ -24,7 +24,7 @@ import { domainError } from '~/http/domain-error'
 import { isPaused } from '~/modules/agent-settings/service'
 import type { Caller } from '~/modules/caller'
 import { phoneHash } from '~/modules/recording/finish'
-import { AgentCallOpenError, type Settlement } from '~/ports/agent-call-store'
+import { AgentCallOpenError, type LineUsage, type Settlement } from '~/ports/agent-call-store'
 import type { ProspectContact, ProspectViewer } from '~/ports/prospect-directory'
 
 /** What the Agent Call request and its gate need from the container. */
@@ -77,6 +77,25 @@ export function startOfLocalDay(at: Date, timeZone: string): Date {
   const offset = local - Math.floor(at.getTime() / 1000) * 1000
   // shortcut: a DST change inside the day moves midnight by an hour, use Temporal if it matters.
   return new Date(Date.UTC(y, m, d) - offset)
+}
+
+/** Allow, or defer without using an attempt, by the Line's concurrent and daily dial caps. */
+export function lineCapDecision(usage: LineUsage, now: Date): GateDecision {
+  if (usage.open >= usage.maxConcurrentAgentCalls) {
+    return {
+      kind: 'deferred',
+      code: 'agent_call.line_cap_reached',
+      retryAt: new Date(now.getTime() + CONCURRENT_RETRY_MS),
+    }
+  }
+  if (usage.dials >= usage.dailyAgentDialCap && usage.oldestDialAt !== null) {
+    return {
+      kind: 'deferred',
+      code: 'agent_call.line_cap_reached',
+      retryAt: new Date(usage.oldestDialAt.getTime() + DAY_MS),
+    }
+  }
+  return { kind: 'allow' }
 }
 
 /**
@@ -167,21 +186,7 @@ export async function evaluateGate(
   if (usage === undefined) {
     throw domainError(VOICE_ERRORS['line.not_found'])
   }
-  if (usage.open >= usage.maxConcurrentAgentCalls) {
-    return {
-      kind: 'deferred',
-      code: 'agent_call.line_cap_reached',
-      retryAt: new Date(now.getTime() + CONCURRENT_RETRY_MS),
-    }
-  }
-  if (usage.dials >= usage.dailyAgentDialCap && usage.oldestDialAt !== null) {
-    return {
-      kind: 'deferred',
-      code: 'agent_call.line_cap_reached',
-      retryAt: new Date(usage.oldestDialAt.getTime() + DAY_MS),
-    }
-  }
-  return { kind: 'allow' }
+  return lineCapDecision(usage, now)
 }
 
 /** The Line a Call goes out on: the one asked for, or the Organization's first active one. */

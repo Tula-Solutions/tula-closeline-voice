@@ -9,6 +9,7 @@ import {
 import {
   AgentCallOpenError,
   type AgentCallStore,
+  type DialClaim,
   type NewAgentCall,
 } from '~/ports/agent-call-store'
 
@@ -230,6 +231,86 @@ export function agentCallStoreBehaviour(name: string, make: () => AgentCallHarne
         queued(lineB, { prospectId, idempotencyKey: 'shared-key-000000001' })
       )
       expect(mine.created).toBe(true)
+    })
+    const claim = (n: number, over: Partial<DialClaim> = {}): DialClaim => ({
+      at: AT,
+      numberHash: hash(n),
+      callId: formatId('call', crypto.randomUUID()),
+      since: new Date(AT.getTime() - 86_400_000),
+      contactCheck: async () => undefined,
+      ...over,
+    })
+
+    test('claimDial moves a queued row to dialing once, with its Call id, and a repeat is gone', async () => {
+      const { store, newLine } = make()
+      const org = newOrganizationId()
+      const row = await store.insert(org, queued(await newLine(org)))
+      const callId = formatId('call', crypto.randomUUID())
+      const first = await store.claimDial(org, row.call.id, claim(1, { callId }))
+      expect(first).toMatchObject({
+        kind: 'claimed',
+        call: { state: 'dialing', callId },
+      })
+      expect(await store.claimDial(org, row.call.id, claim(1))).toEqual({ kind: 'gone' })
+      expect((await store.byCallId(org, callId))?.id).toBe(row.call.id)
+      expect((await store.numberDials(org, hash(1), new Date(0))).count).toBe(1)
+    })
+
+    test('claimDial answers capped with the usage when the Line is full, and refused when the Contact Check says so', async () => {
+      const { store, newLine } = make()
+      const org = newOrganizationId()
+      const line = await newLine(org)
+      for (let n = 0; n < 3; n += 1) {
+        const row = await store.insert(org, queued(line))
+        expect((await store.claimDial(org, row.call.id, claim(n))).kind).toBe('claimed')
+      }
+      const fourth = await store.insert(org, queued(line))
+      expect(await store.claimDial(org, fourth.call.id, claim(9))).toMatchObject({
+        kind: 'capped',
+        usage: { open: 3, maxConcurrentAgentCalls: 3 },
+      })
+      const other = await newLine(org)
+      const blocked = await store.insert(org, queued(other))
+      const refusal = { kind: 'blocked', gateCode: 'consent.missing', at: AT } as const
+      expect(
+        await store.claimDial(org, blocked.call.id, claim(8, { contactCheck: async () => refusal }))
+      ).toEqual({ kind: 'refused', settlement: refusal })
+      expect((await store.get(org, blocked.call.id))?.state).toBe('queued')
+    })
+
+    test('finish ends a dialing row once and a replay changes nothing; markLive needs dialing', async () => {
+      const { store, newLine } = make()
+      const org = newOrganizationId()
+      const row = await store.insert(org, queued(await newLine(org)))
+      expect(await store.markLive(org, row.call.id)).toBeUndefined()
+      await store.claimDial(org, row.call.id, claim(1))
+      expect((await store.markLive(org, row.call.id))?.state).toBe('live')
+      const end = { result: 'answered', endReason: 'not_now', durationSeconds: 12, at: AT } as const
+      const ended = await store.finish(org, row.call.id, end)
+      expect(ended).toMatchObject({ state: 'ended', result: 'answered', endReason: 'not_now' })
+      expect(
+        await store.finish(org, row.call.id, { ...end, result: 'voicemail', endReason: null })
+      ).toBeUndefined()
+      expect((await store.get(org, row.call.id))?.result).toBe('answered')
+    })
+
+    test('Organization B cannot claim, finish or find the Call of A', async () => {
+      const { store, newLine } = make()
+      const a = newOrganizationId()
+      const b = newOrganizationId()
+      const row = await store.insert(a, queued(await newLine(a)))
+      expect(await store.claimDial(b, row.call.id, claim(1))).toEqual({ kind: 'gone' })
+      const only = formatId('call', crypto.randomUUID())
+      await store.claimDial(a, row.call.id, claim(1, { callId: only }))
+      expect(await store.byCallId(b, only)).toBeUndefined()
+      expect(
+        await store.finish(b, row.call.id, {
+          result: 'busy',
+          endReason: null,
+          durationSeconds: null,
+          at: AT,
+        })
+      ).toBeUndefined()
     })
   })
 }
