@@ -1,22 +1,36 @@
 import {
   AGENT_ERRORS,
   AGENT_ROUTES,
+  decodeCursor,
   ERRORS,
+  encodeCursor,
   type Handoff,
+  type HandoffContext,
+  handoffContextSchema,
+  type listHandoffsQuerySchema,
   MAX_HANDOFF_CONTEXT_TURNS,
   type OrganizationId,
   type VoiceCall,
 } from 'tula-closeline-contract'
+import type { z } from 'zod'
 import type { Container } from '~/container'
 import { describeError } from '~/describe-error'
 import { domainError } from '~/http/domain-error'
 import * as Calls from '~/modules/call/service'
 import type { Caller } from '~/modules/caller'
 import * as Transcript from '~/modules/transcript/service'
-import { type HandoffResult, MAX_HANDOFF_ATTEMPTS } from '~/ports/handoff-store'
+import {
+  type HandoffResult,
+  handoffCursorSchema,
+  MAX_HANDOFF_ATTEMPTS,
+} from '~/ports/handoff-store'
+
+/** The parsed query of the list route. */
+type ListHandoffsQuery = z.infer<typeof listHandoffsQuerySchema>
 
 /** What the Handoff service needs from the container. */
-export type HandoffDeps = Calls.CallDeps & Pick<Container, 'handoffs' | 'turns' | 'sleep'>
+export type HandoffDeps = Calls.CallDeps &
+  Pick<Container, 'handoffs' | 'turns' | 'sleep' | 'qualification'>
 
 /** How often a ringing Handoff is checked for the Rep's answer, in ms. */
 const POLL_MS = 500
@@ -290,4 +304,91 @@ export async function decline(
     return now
   }
   throw domainError(AGENT_ERRORS['handoff.not_pending'])
+}
+
+/** The Handoff the caller may see, or `handoff.not_found`; the caller's view is the Calls' view. */
+async function visibleHandoff(deps: HandoffDeps, caller: Caller, id: Handoff['id']) {
+  const reps = await Calls.visibleReps(deps, caller)
+  const handoff = await deps.handoffs.get(caller.organizationId, id)
+  if (
+    handoff === undefined ||
+    (reps !== undefined &&
+      (handoff.repMembershipId === null || !reps.includes(handoff.repMembershipId)))
+  ) {
+    throw domainError(AGENT_ERRORS['handoff.not_found'])
+  }
+  return handoff
+}
+
+/**
+ * Lists the Handoffs the caller may see, newest first, one page at a time: a Rep's are those
+ * offered to them, a Manager's add their Teams' Reps, an Owner or Admin sees all. One indexed query.
+ */
+export async function list(deps: HandoffDeps, caller: Caller, query: ListHandoffsQuery) {
+  const reps = await Calls.visibleReps(deps, caller)
+  const cursor =
+    query.cursor === undefined ? undefined : decodeCursor(query.cursor, handoffCursorSchema)
+  if (query.cursor !== undefined && cursor === undefined) {
+    throw domainError(ERRORS['request.invalid'])
+  }
+  const rows = await deps.handoffs.list(caller.organizationId, {
+    limit: query.limit + 1,
+    ...(cursor === undefined ? {} : { cursor }),
+    ...(query.state === undefined ? {} : { state: query.state }),
+    ...(reps === undefined ? {} : { repMembershipIds: reps }),
+  })
+  const items = rows.slice(0, query.limit)
+  const last = items.at(-1)
+  return {
+    items,
+    nextCursor:
+      rows.length > query.limit && last
+        ? encodeCursor({ requestedAt: last.requestedAt, id: last.id })
+        : null,
+  }
+}
+
+/**
+ * What the Rep sees before answering: the Prospect, the Qualification so far and the last turns.
+ * Never logged. A Chat Handoff, or one outside the caller's view, is `handoff.not_found`.
+ */
+export async function context(
+  deps: HandoffDeps,
+  caller: Caller,
+  id: Handoff['id']
+): Promise<HandoffContext> {
+  const handoff = await visibleHandoff(deps, caller, id)
+  const org = caller.organizationId
+  const call = handoff.callId === null ? undefined : await deps.calls.get(org, handoff.callId)
+  if (handoff.callId === null || call === undefined) {
+    throw domainError(AGENT_ERRORS['handoff.not_found'])
+  }
+  const inquiry = await deps.qualification.inquiryOfCall(org, handoff.callId)
+  const details = inquiry === undefined ? undefined : await deps.qualification.details(org, inquiry)
+  const answers = inquiry === undefined ? [] : await deps.qualification.answers(org, inquiry)
+  const prospectId = call.prospectId ?? details?.prospectId
+  if (prospectId === undefined) {
+    throw domainError(AGENT_ERRORS['handoff.not_found'])
+  }
+  const turns = await deps.turns.recent(
+    org,
+    { kind: 'call', id: handoff.callId },
+    END_OF_CALL,
+    MAX_HANDOFF_CONTEXT_TURNS
+  )
+  // Parsing applies the contract's id brands and bounds; a stored row that breaks them fails loudly.
+  return handoffContextSchema.parse({
+    handoffId: handoff.id,
+    prospectId,
+    qualification: { answers, summary: details?.summary ?? null },
+    recentTurns: turns.map((turn) => ({
+      index: turn.index,
+      role: turn.role,
+      text: turn.text,
+      sources: [...turn.sources],
+      deferred: turn.deferred,
+      toolCall: turn.toolName === null ? null : { name: turn.toolName },
+      at: turn.createdAt,
+    })),
+  })
 }

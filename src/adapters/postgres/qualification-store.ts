@@ -42,6 +42,24 @@ export function createPostgresQualificationStore(db: Database): QualificationSto
       }))
     },
 
+    async details(organizationId, inquiryId) {
+      const [row] = await withOrganization(db, organizationId, (tx) =>
+        tx
+          .select({
+            prospectId: voiceInquiries.prospectId,
+            summary: voiceInquiries.qualificationSummary,
+          })
+          .from(voiceInquiries)
+          .where(
+            and(eq(voiceInquiries.organizationId, organizationId), eq(voiceInquiries.id, inquiryId))
+          )
+          .limit(1)
+      )
+      return row === undefined
+        ? undefined
+        : { prospectId: row.prospectId, summary: row.summary ?? null }
+    },
+
     async record(organizationId, inquiryId, answer) {
       await withOrganization(db, organizationId, (tx) =>
         tx

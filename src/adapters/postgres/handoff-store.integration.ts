@@ -97,4 +97,45 @@ describe('postgres handoff store', () => {
     expect(await handoffs.forCall(other, callId)).toEqual([])
     expect(await handoffs.answer(other, h.id, rep, 'accepted', t1)).toBeUndefined()
   })
+
+  test('list is newest first, pages by cursor, and is limited by state, Rep and Organization', async () => {
+    const org = formatId('org', crypto.randomUUID())
+    const other = formatId('org', crypto.randomUUID())
+    const mine = formatId('mem', crypto.randomUUID())
+    const theirs = formatId('mem', crypto.randomUUID())
+    const at = (s: number) => new Date(t0.getTime() + s * 1000)
+    const offer = async (rep: string, s: number) =>
+      must(
+        await handoffs.offer(org, {
+          callId: await newCall(org),
+          repMembershipId: rep,
+          attempt: 1,
+          reason: 'qualified',
+          at: at(s),
+        })
+      )
+    const oldest = await offer(mine, 1)
+    const middle = await offer(theirs, 2)
+    const newest = await offer(mine, 3)
+    await handoffs.answer(org, oldest.id, mine, 'declined', at(4))
+    const ids = (rows: { id: string }[]) => rows.map((h) => h.id)
+    expect(ids(await handoffs.list(org, { limit: 10 }))).toEqual([newest.id, middle.id, oldest.id])
+    expect(ids(await handoffs.list(org, { limit: 10, repMembershipIds: [mine] }))).toEqual([
+      newest.id,
+      oldest.id,
+    ])
+    expect(
+      ids(await handoffs.list(org, { limit: 10, state: 'pending', repMembershipIds: [mine] }))
+    ).toEqual([newest.id])
+    expect(await handoffs.list(org, { limit: 10, repMembershipIds: [] })).toEqual([])
+    expect(
+      ids(
+        await handoffs.list(org, {
+          limit: 10,
+          cursor: { requestedAt: newest.requestedAt, id: newest.id },
+        })
+      )
+    ).toEqual([middle.id, oldest.id])
+    expect(await handoffs.list(other, { limit: 10 })).toEqual([])
+  })
 })

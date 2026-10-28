@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { formatId, type Handoff, handoffSchema } from 'tula-closeline-contract'
 import { type Database, withOrganization } from 'tula-closeline-db'
 import { voiceHandoffs } from 'tula-closeline-db/schema'
@@ -75,6 +75,33 @@ export function createPostgresHandoffStore(db: Database): HandoffStore {
             )
             .orderBy(asc(voiceHandoffs.requestedAt), asc(voiceHandoffs.attempt))
             .limit(MAX_HANDOFF_ATTEMPTS * 2)
+        ).map(toHandoff)
+      )
+    },
+
+    async list(organizationId, query) {
+      const reps = query.repMembershipIds
+      return withOrganization(db, organizationId, async (tx) =>
+        (
+          await tx
+            .select()
+            .from(voiceHandoffs)
+            .where(
+              and(
+                eq(voiceHandoffs.organizationId, organizationId),
+                query.state === undefined ? undefined : eq(voiceHandoffs.state, query.state),
+                reps === undefined
+                  ? undefined
+                  : reps.length === 0
+                    ? sql`false`
+                    : inArray(voiceHandoffs.repMembershipId, [...reps]),
+                query.cursor === undefined
+                  ? undefined
+                  : sql`(${voiceHandoffs.requestedAt}, ${voiceHandoffs.id}) < (${query.cursor.requestedAt}::timestamptz, ${query.cursor.id})`
+              )
+            )
+            .orderBy(desc(voiceHandoffs.requestedAt), desc(voiceHandoffs.id))
+            .limit(query.limit)
         ).map(toHandoff)
       )
     },
