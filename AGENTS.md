@@ -74,7 +74,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   stored Disclosure has `aiAssisted` and it has a Rep. Final turns are saved once each through
   `CallTurnStore` (`voice.call_turns`, sequence per track; O(1) per turn, no hot-path benchmark).
   `GET /v1/calls/{callId}/copilot/stream` is SSE (`copilot.status`, `transcript.turn`,
-  `copilot.card`, `transcript.unavailable`); ids are cursors `r<n>.p<m>.c<k>` (`k` is the last card
+  `copilot.card`, `copilot.card_updated`, `transcript.unavailable`); ids are cursors `r<n>.p<m>.c<k>` (`k` is the last card
   sequence) and `Last-Event-ID` resumes from the store.
   A speech-to-text failure never touches the Call: it sets `voice.calls.transcript_unavailable`
   (`speech_to_text_failed` | `stream_dropped`, in Postgres, so any instance's SSE stream sees it) and
@@ -148,8 +148,16 @@ local defaults only when `ENVIRONMENT=local` and are required elsewhere; `QUEUE_
   Call): it searches `evidence.searchMoments` (last at most 6 turns, 2000 characters, 5 Moments, 1.2 s via
   `copilot.cardSearchTimeoutMs`, no retry), drops a stale answer, applies the throttle (one card per 8 s,
   60 per Call, no repeat of a Moment in 60 s) and the minimum evidence (the contract defaults, 3 Moments
-  from 2 Deals; the settings ticket is not built), and stores the card in `CopilotCardStore`
-  (`voice.copilot_cards`). No model call, never throws, logs only the Call and a code. The Moment key is
+  from 2 Deals, read only through `minimumEvidence` in `service.ts`; the settings ticket replaces it there), and stores the card in `CopilotCardStore`
+  (`voice.copilot_cards`). Never throws, logs only the Call and a code.
+  A Prospect turn that asks about price, terms or a product detail also runs `evidence.searchDocuments`
+  (same timeout, no retry); with a passage the card is a `document` card (source: Document id, page,
+  passage; the contract card has no Document name, the portal resolves it by id), without one nothing
+  changes. After a `similar_moment` card is stored the model composer (`llm.complete`, fast tier, 600 ms,
+  no retry) may upgrade it in place (`CopilotCardStore.upgrade`) to an `objection` or `next_step` card:
+  it sees only the retrieved Moments as delimited untrusted data, and its answer is discarded (the
+  retrieval card stands) unless it fits the strict schema, cites only retrieved Moment ids and makes a
+  valid card. The SSE stream then sends `copilot.card_updated` once (watched for 10 s after a send). The Moment key is
   its `callId`. Over HTTP the Playbook has no `/internal/v1/playbook/search/moments` route yet (hub #412),
   so there no card is shown until it exists; the quiet reasons are not emitted yet.
 
@@ -161,10 +169,10 @@ size), and one Agent turn on a live Call (`AgentCall.hear`: Call read, cap check
 with its idempotent turn inserts and one atomic cost add, streaming TTS; O(1) in the Organization,
 and reads a bounded window of recent turns), the Agent Call gate (`evaluateGate`: about six keyed or
 indexed reads, O(1) in the Organization), and one retrieval card check after a Prospect turn
-(`Cards.onProspectTurn`: two tallies of one Call's cards, one bounded search, one insert; O(1) in the
-Organization). Budgets are in `bench/` (`bench/webhook.bench.test.ts`,
+(`Cards.onProspectTurn`: two tallies of one Call's cards, one bounded search, one insert, and one
+model upgrade call; O(1) in the Organization). Budgets are in `bench/` (`bench/webhook.bench.test.ts`,
 `bench/agent-turn.bench.test.ts`, `bench/agent-call-gate.bench.test.ts`,
-`bench/copilot-card.bench.test.ts`).
+`bench/copilot-card.bench.test.ts`, `bench/copilot-compose.bench.test.ts`).
 
 A benchmark times `measure(operation)`: a warm-up, then several batches, gated on the fastest, so a
 noisy runner cannot fail it but a real regression (every batch slower) does. Budget is about 5x the

@@ -13,6 +13,9 @@ export type MomentMatch = SearchMomentsResponse['items'][number]
 /** What a Moments search found: the matches and the Playbook's own count of Moments and Deals. */
 export type MomentSearch = Pick<SearchMomentsResponse, 'items' | 'evidence'>
 
+/** What a Documents search found: the passages, best first, and the Playbook's own counts. */
+export type DocumentSearch = Pick<SearchDocumentsResponse, 'items' | 'evidence'>
+
 /** What a search for evidence found: Document passages (citable) and won-Deal Moments (wording only). */
 export type Evidence = { documents: DocumentMatch[]; moments: MomentMatch[] }
 
@@ -34,4 +37,14 @@ export type EvidenceSearch = {
     limit: number,
     signal?: AbortSignal
   ) => Promise<MomentSearch>
+  /**
+   * The best Document passages for the latest turns (at most `limit`), best first. Unlike `search`
+   * it does not retry (a live Call cannot wait); `signal` ends it early. A failure throws.
+   */
+  searchDocuments: (
+    organizationId: string,
+    turns: readonly SearchTurn[],
+    limit: number,
+    signal?: AbortSignal
+  ) => Promise<DocumentSearch>
 }

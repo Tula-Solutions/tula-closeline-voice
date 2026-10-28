@@ -1,5 +1,5 @@
 import { and, asc, count, eq, gt, gte, sql } from 'drizzle-orm'
-import { type CopilotCardId, formatId } from 'tula-closeline-contract'
+import { type CopilotCard, type CopilotCardId, formatId } from 'tula-closeline-contract'
 import { type Database, withOrganization } from 'tula-closeline-db'
 import { voiceCopilotCards } from 'tula-closeline-db/schema'
 import {
@@ -10,21 +10,43 @@ import {
 
 type Row = typeof voiceCopilotCards.$inferSelect
 
-// shortcut: only `similar_moment` rows exist until the model composer upgrades cards in place;
-// widen this mapping when the composer ticket lands.
-const toCard = (row: Row): SimilarMomentCard => ({
-  kind: 'similar_moment',
-  id: row.id as CopilotCardId,
-  callId: row.callId as SimilarMomentCard['callId'],
-  sequence: row.sequence,
-  evidence: { moments: row.evidenceMoments, deals: row.evidenceDeals },
-  citedMoments: row.citedMoments as SimilarMomentCard['citedMoments'],
-  quotes: row.quotes as SimilarMomentCard['quotes'],
-  shownAt: row.shownAt.toISOString(),
-  rating: row.rating as SimilarMomentCard['rating'],
-  dismissed: row.dismissed,
-  pinned: row.pinned,
-})
+const toCard = (row: Row): CopilotCard => {
+  const base = {
+    id: row.id as CopilotCardId,
+    callId: row.callId as CopilotCard['callId'],
+    sequence: row.sequence,
+    evidence: { moments: row.evidenceMoments, deals: row.evidenceDeals },
+    citedMoments: row.citedMoments as CopilotCard['citedMoments'],
+    quotes: row.quotes as CopilotCard['quotes'],
+    shownAt: row.shownAt.toISOString(),
+    rating: row.rating as CopilotCard['rating'],
+    dismissed: row.dismissed,
+    pinned: row.pinned,
+  }
+  switch (row.kind) {
+    case 'objection':
+      return {
+        ...base,
+        kind: 'objection',
+        objectionType: row.objectionType as never,
+        response: row.response as string,
+      }
+    case 'next_step':
+      return { ...base, kind: 'next_step', nextStep: row.nextStep as string }
+    case 'document':
+      return {
+        ...base,
+        kind: 'document',
+        source: {
+          documentId: row.documentId as never,
+          page: row.documentPage,
+          passage: row.documentPassage as string,
+        },
+      }
+    default:
+      return { ...base, kind: 'similar_moment' }
+  }
+}
 
 /** A {@link CopilotCardStore} over `voice.copilot_cards`. */
 export function createPostgresCopilotCardStore(db: Database): CopilotCardStore {
@@ -39,7 +61,10 @@ export function createPostgresCopilotCardStore(db: Database): CopilotCardStore {
             callId,
             // The next sequence on the Call; two writers racing for it collide on the unique key.
             sequence: sql`(select coalesce(max(c.sequence), 0) + 1 from voice.copilot_cards c where c.organization_id = ${organizationId} and c.call_id = ${callId})`,
-            kind: 'similar_moment',
+            kind: card.source ? 'document' : 'similar_moment',
+            documentId: card.source?.documentId,
+            documentPage: card.source?.page,
+            documentPassage: card.source?.passage,
             evidenceMoments: card.evidence.moments,
             evidenceDeals: card.evidence.deals,
             citedMoments: card.citedMoments,
@@ -51,6 +76,30 @@ export function createPostgresCopilotCardStore(db: Database): CopilotCardStore {
           throw new Error('copilot card insert returned no row')
         }
         return toCard(row)
+      })
+    },
+    async upgrade(organizationId, callId, cardId, composed) {
+      return withOrganization(db, organizationId, async (tx) => {
+        const [row] = await tx
+          .update(voiceCopilotCards)
+          .set({
+            kind: composed.kind,
+            objectionType: composed.kind === 'objection' ? composed.objectionType : null,
+            response: composed.kind === 'objection' ? composed.response : null,
+            nextStep: composed.kind === 'next_step' ? composed.nextStep : null,
+            citedMoments: composed.citedMoments,
+            quotes: composed.quotes,
+          })
+          .where(
+            and(
+              eq(voiceCopilotCards.organizationId, organizationId),
+              eq(voiceCopilotCards.callId, callId),
+              eq(voiceCopilotCards.id, cardId),
+              eq(voiceCopilotCards.kind, 'similar_moment')
+            )
+          )
+          .returning()
+        return row === undefined ? undefined : toCard(row)
       })
     },
     async list(organizationId, callId, afterSequence, limit) {

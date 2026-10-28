@@ -54,6 +54,7 @@ export function createUnconfiguredEvidenceSearch(): EvidenceSearch {
   return {
     search: async () => Promise.reject(unavailable()),
     searchMoments: async () => Promise.reject(unavailable()),
+    searchDocuments: async () => Promise.reject(unavailable()),
   }
 }
 

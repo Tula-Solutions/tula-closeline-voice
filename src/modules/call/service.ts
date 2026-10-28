@@ -35,6 +35,7 @@ export type CallDeps = Pick<
   | 'recordings'
   | 'callTurns'
   | 'copilotCards'
+  | 'llm'
   | 'evidence'
   | 'transcribe'
   | 'copilot'

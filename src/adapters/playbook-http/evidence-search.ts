@@ -6,6 +6,7 @@ import {
   searchMomentsResponseSchema,
 } from 'tula-closeline-contract'
 import { AppError } from 'tula-closeline-kit'
+import type { z } from 'zod'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 
 /** The longest one attempt at the Playbook may take: a live chat turn cannot wait longer, in ms. */
@@ -107,41 +108,70 @@ export function createPlaybookHttpEvidenceSearch(options: PlaybookHttpOptions): 
   const momentsUrl = `${options.baseUrl.replace(/\/+$/, '')}/internal/v1/playbook/search/moments`
   const momentsTimeoutMs = options.momentsTimeoutMs ?? PLAYBOOK_MOMENTS_TIMEOUT_MS
 
-  return {
-    async searchMoments(organizationId, turns, limit, signal) {
-      const request = searchMomentsRequestSchema.safeParse({ turns, limit })
-      if (!request.success) {
+  /** One attempt at a Copilot search under the Moments timeout; it never retries. */
+  async function readOnce<Out extends { items: unknown; evidence: unknown }>(
+    target: string,
+    requestSchema: z.ZodType,
+    responseSchema: z.ZodType<Out>,
+    organizationId: string,
+    body: unknown,
+    signal: AbortSignal | undefined
+  ): Promise<Pick<Out, 'items' | 'evidence'>> {
+    const request = requestSchema.safeParse(body)
+    if (!request.success) {
+      throw fail('server.unavailable')
+    }
+    const timeout = AbortSignal.timeout(momentsTimeoutMs)
+    try {
+      const response = await doFetch(target, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${options.token}`,
+          'x-organization-id': organizationId,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify(request.data),
+        redirect: 'error',
+        signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+      })
+      const data = response.status === 200 ? await response.json() : undefined
+      if (response.status !== 200) {
+        await response.body?.cancel().catch(() => {})
+      }
+      const parsed = responseSchema.safeParse(data)
+      if (!parsed.success) {
         throw fail('server.unavailable')
       }
-      const timeout = AbortSignal.timeout(momentsTimeoutMs)
-      try {
-        const response = await doFetch(momentsUrl, {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${options.token}`,
-            'x-organization-id': organizationId,
-            'content-type': 'application/json',
-            accept: 'application/json',
-          },
-          body: JSON.stringify(request.data),
-          redirect: 'error',
-          signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
-        })
-        const data = response.status === 200 ? await response.json() : undefined
-        if (response.status !== 200) {
-          await response.body?.cancel().catch(() => {})
-        }
-        const parsed = searchMomentsResponseSchema.safeParse(data)
-        if (!parsed.success) {
-          throw fail('server.unavailable')
-        }
-        return { items: parsed.data.items, evidence: parsed.data.evidence }
-      } catch (error) {
-        if (error instanceof AppError) {
-          throw error
-        }
-        throw fail(timeout.aborted ? 'server.timeout' : 'server.unavailable')
+      return { items: parsed.data.items, evidence: parsed.data.evidence }
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error
       }
+      throw fail(timeout.aborted ? 'server.timeout' : 'server.unavailable')
+    }
+  }
+
+  return {
+    async searchMoments(organizationId, turns, limit, signal) {
+      return readOnce(
+        momentsUrl,
+        searchMomentsRequestSchema,
+        searchMomentsResponseSchema,
+        organizationId,
+        { turns, limit },
+        signal
+      )
+    },
+    async searchDocuments(organizationId, turns, limit, signal) {
+      return readOnce(
+        url,
+        searchDocumentsRequestSchema,
+        searchDocumentsResponseSchema,
+        organizationId,
+        { turns, limit },
+        signal
+      )
     },
     async search(organizationId, turns, limit) {
       const request = searchDocumentsRequestSchema.safeParse({ turns, limit })

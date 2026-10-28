@@ -10,6 +10,7 @@ export type MediaDeps = Pick<
   | 'calls'
   | 'callTurns'
   | 'copilotCards'
+  | 'llm'
   | 'evidence'
   | 'telephony'
   | 'transcribe'

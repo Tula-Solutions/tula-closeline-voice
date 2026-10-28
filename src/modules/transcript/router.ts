@@ -20,6 +20,9 @@ import * as Calls from '~/modules/call/service'
 import * as Page from '~/modules/transcript/page'
 import { MAX_TURN_PAGE, type TurnCursor } from '~/ports/call-turn-store'
 
+/** How long, in ms, a sent retrieval card is watched for an in-place upgrade. */
+const UPGRADE_WAIT_MS = 10_000
+
 /** The most cards one poll sends. */
 const MAX_CARD_BATCH = 20
 
@@ -30,7 +33,9 @@ const streamRoute = createRoute({
   summary: 'Stream the live Transcript of a Call',
   description:
     'Server-Sent Events: copilot.status, then transcript.turn for each final turn in order, and ' +
-    'copilot.card for each retrieval card (similar won-Deal Moments, with their evidence), and ' +
+    'copilot.card for each card (similar won-Deal Moments, or a Document passage, with their ' +
+    'evidence), copilot.card_updated when the model composer upgrades a shown retrieval card to ' +
+    'an objection or next-step card, and ' +
     'transcript.unavailable if speech-to-text fails (the Call goes on). A stream ends after a few ' +
     'minutes, so the token is checked again when the client reconnects with `Last-Event-ID`. Opens once the Call is ' +
     'disclosing and says waiting_for_disclosure until an AI-assisted Disclosure has played. ' +
@@ -134,6 +139,7 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
       let delivered = cursor.rep + cursor.prospect
       let said = ''
       let sentUnavailable = false
+      const upgrading = new Map<number, number>()
       const deadline = performance.now() + container.copilot.maxStreamMs
       while (!aborted && performance.now() < deadline) {
         const call = await container.calls.get(org, callId)
@@ -185,6 +191,25 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
         for (const card of cards) {
           cursor.cards = card.sequence
           await send({ event: 'copilot.card', data: { card } } as never)
+          if (card.kind === 'similar_moment') {
+            upgrading.set(card.sequence, Date.now() + UPGRADE_WAIT_MS)
+          }
+        }
+        // A retrieval card may be upgraded in place soon after it was sent: say so once.
+        if (!refused && upgrading.size > 0) {
+          const from = Math.min(...upgrading.keys()) - 1
+          const now = Date.now()
+          for (const card of await container.copilotCards.list(org, callId, from, MAX_CARD_BATCH)) {
+            if (upgrading.has(card.sequence) && card.kind !== 'similar_moment') {
+              upgrading.delete(card.sequence)
+              await send({ event: 'copilot.card_updated', data: { card } } as never)
+            }
+          }
+          for (const [sequence, until] of upgrading) {
+            if (until < now) {
+              upgrading.delete(sequence)
+            }
+          }
         }
         if (state === 'ended' && turns.length === 0 && cards.length === 0) {
           return
