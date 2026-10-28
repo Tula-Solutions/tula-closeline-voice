@@ -237,3 +237,12 @@ test('vendor prices are required outside local and must be non-negative whole nu
       .LLM_INPUT_PRICE_MICRO_CENTS_PER_TOKEN
   ).toBe(0)
 })
+
+test('LLM_MODEL is optional and must be a bare anthropic model id', () => {
+  expect(loadEnv({ ENVIRONMENT: 'local' }).LLM_MODEL).toBeUndefined()
+  const id = 'anthropic.claude-haiku-4-5-20251001-v1:0'
+  expect(loadEnv({ ENVIRONMENT: 'local', LLM_MODEL: id }).LLM_MODEL).toBe(id)
+  for (const bad of ['us.anthropic.claude-haiku-4-5-20251001-v1:0', 'gpt-4', '', 'anthropic.x y']) {
+    expect(() => loadEnv({ ENVIRONMENT: 'local', LLM_MODEL: bad })).toThrow()
+  }
+})

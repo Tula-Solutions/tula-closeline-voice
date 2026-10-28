@@ -20,7 +20,7 @@ from the hub (`tula-closeline`). This file holds only what is specific to this r
 
 Other scripts are in `package.json`.
 
-Every voice model call uses Haiku 5.5: `VOICE_LLM_MODELS` in `src/container.ts` sets both the fast and smart tiers to the kit's `DEFAULT_BEDROCK_FAST_MODEL`.
+Every voice model call uses one model: `voiceLlmModels` in `src/container.ts` sets both the fast and smart tiers to `LLM_MODEL` (a bare `anthropic.*` id; the kit adds the Region's profile prefix), else the kit's `DEFAULT_BEDROCK_FAST_MODEL` (Haiku 5.5). Where AWS has not approved Claude 5.x, set `LLM_MODEL=anthropic.claude-haiku-4-5-20251001-v1:0`.
 
 ## Layout
 

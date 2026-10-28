@@ -252,14 +252,14 @@ function createTranscribe(env: Env): StreamingTranscribePort {
     : createUnconfiguredStreamingTranscribe()
 }
 
-/** Voice needs no strong model: both tiers are Haiku 5.5. */
-export const VOICE_LLM_MODELS = {
-  fast: DEFAULT_BEDROCK_FAST_MODEL,
-  smart: DEFAULT_BEDROCK_FAST_MODEL,
+/** Voice needs no strong model: both tiers are `LLM_MODEL`, Haiku 5.5 when unset. */
+export function voiceLlmModels(env: Pick<Env, 'LLM_MODEL'>) {
+  const model = env.LLM_MODEL ?? DEFAULT_BEDROCK_FAST_MODEL
+  return { fast: model, smart: model }
 }
 
 function createLlm(env: Env, logger: Logger): LlmPort {
-  return createBedrockLlm({ region: env.AWS_REGION, logger, models: VOICE_LLM_MODELS })
+  return createBedrockLlm({ region: env.AWS_REGION, logger, models: voiceLlmModels(env) })
 }
 
 /** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */

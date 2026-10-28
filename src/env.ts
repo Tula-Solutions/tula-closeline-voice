@@ -102,6 +102,12 @@ const schema = z
     AUTH_AUDIENCE: z.string().min(1).max(2_048).optional(),
     /** The AWS Region of the queue and the bucket (not the Closeline Region above). */
     AWS_REGION: z.string().min(1).max(64).optional(),
+    /** The Bedrock model id (bare `anthropic.*`, no Region prefix) for every voice model call; Haiku 5.5 when unset. */
+    LLM_MODEL: z
+      .string()
+      .max(128)
+      .regex(/^anthropic\.[A-Za-z0-9._:-]+$/)
+      .optional(),
     /** The event queue's URL. Required outside `local`. */
     QUEUE_URL: z.url().max(2_048).optional(),
     /** Where ElasticMQ listens, for a local run against it. Accepted only when `local`. */
