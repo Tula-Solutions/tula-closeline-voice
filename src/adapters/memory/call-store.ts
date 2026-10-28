@@ -42,6 +42,11 @@ export function createMemoryCallStore(): MemoryCallStore {
     call.state === 'ringing' &&
     Date.parse(call.createdAt) < before.getTime()
 
+  const isStaleOutbound = (call: StoredCall, before: Date): boolean =>
+    call.direction === 'outbound' &&
+    (call.state === 'ringing' || call.state === 'connecting') &&
+    Date.parse(call.createdAt) < before.getTime()
+
   return {
     idsOf: (organizationId) => [...rowsOf(organizationId).keys()],
 
@@ -85,6 +90,7 @@ export function createMemoryCallStore(): MemoryCallStore {
         providerCallSid: null,
         endReason: null,
         agentCostMicroCents: 0,
+        copilot: input.copilot ?? false,
       }
       rows.set(call.id, {
         call,
@@ -124,6 +130,7 @@ export function createMemoryCallStore(): MemoryCallStore {
         providerCallSid: input.providerCallSid,
         endReason: null,
         agentCostMicroCents: 0,
+        copilot: false,
       }
       rows.set(call.id, {
         call,
@@ -191,6 +198,36 @@ export function createMemoryCallStore(): MemoryCallStore {
         }
       }
       return missed
+    },
+
+    async organizationsWithStaleOutbound(before, after, limit) {
+      return [...organizations.entries()]
+        .filter(
+          ([id, rows]) =>
+            (after === null || id > after) &&
+            [...rows.values()].some((row) => isStaleOutbound(row.call, before))
+        )
+        .map(([id]) => id)
+        .sort()
+        .slice(0, limit)
+    },
+
+    async failStaleOutbound(organizationId, before, at, limit) {
+      const failed: StoredCall[] = []
+      for (const row of rowsOf(organizationId).values()) {
+        if (failed.length >= limit) {
+          break
+        }
+        if (isStaleOutbound(row.call, before)) {
+          const fromState = row.call.state
+          row.call.state = 'failed'
+          row.call.failureReason = fromState === 'ringing' ? 'no_answer' : 'provider_error'
+          row.call.endedAt = at.toISOString()
+          row.log.push({ kind: 'state_changed', fromState, toState: 'failed', at })
+          failed.push(copy(row.call))
+        }
+      }
+      return failed
     },
 
     async get(organizationId, id) {

@@ -137,6 +137,11 @@ export async function receive(
   if (result === 'unknown_call') {
     throw domainError(VOICE_ERRORS['call.provider_call_not_found'])
   }
+  if (kind === 'status' && mapped.type !== undefined) {
+    // Also on a repeat: the first delivery may have logged the event and then failed to act on it,
+    // and acting twice is safe (only the first `ringing` to `connecting` move starts the setup).
+    await Calls.onProviderStatus(deps, query.data.organizationId, query.data.callId, mapped.type)
+  }
   const recordingSid = form.get('RecordingSid')
   if (kind === 'recording' && recordingSid) {
     // Also on a repeat: the first delivery may have logged the event and then failed to queue the

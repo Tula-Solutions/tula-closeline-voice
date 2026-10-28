@@ -15,6 +15,8 @@ export type StoredCall = VoiceCall & {
   providerCallSid: string | null
   /** What the Agent's speech, hearing and thinking have cost so far, in micro-cents; never returned. */
   agentCostMicroCents: number
+  /** Whether the Call was placed with the Copilot on; set at place time, never changed. */
+  copilot: boolean
 }
 
 /** What the store needs to create an outbound Call; it starts `ringing`. */
@@ -24,6 +26,8 @@ export type NewCall = {
   repMembershipId: string
   prospectId: VoiceCall['prospectId']
   prospectNumber: string
+  /** Whether the Rep asked for the Copilot; it picks the Disclosure wording when the Prospect answers. */
+  copilot?: boolean
   /** The stored form of the `Idempotency-Key` (a digest, never the raw key), with its fingerprint. */
   idempotency?: { key: string; fingerprint: string }
   createdAt: Date
@@ -149,6 +153,26 @@ export type CallStore = {
    * meantime is not `ringing` and is not touched, so repeating this is harmless.
    */
   missStaleRinging: (
+    organizationId: string,
+    before: Date,
+    at: Date,
+    limit: number
+  ) => Promise<StoredCall[]>
+  /**
+   * Up to `limit` Organization ids, ascending and strictly after `after`, that hold an outbound
+   * Call still `ringing` or `connecting` since before `before`.
+   */
+  organizationsWithStaleOutbound: (
+    before: Date,
+    after: string | null,
+    limit: number
+  ) => Promise<string[]>
+  /**
+   * Moves up to `limit` of the Organization's outbound Calls that have been `ringing` (reason
+   * `no_answer`) or `connecting` (reason `provider_error`) since before `before` to `failed`, in
+   * one conditional update, and returns them. A Call that moved on meanwhile is not touched.
+   */
+  failStaleOutbound: (
     organizationId: string,
     before: Date,
     at: Date,

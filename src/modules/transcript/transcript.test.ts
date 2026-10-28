@@ -8,6 +8,7 @@ import {
   createTestApp,
   identityOf,
   newOrganizationId,
+  reportStatus,
   type TestApp,
   type TestIdentity,
 } from '~/testing'
@@ -51,7 +52,12 @@ async function place(body: Record<string, unknown>) {
     body: JSON.stringify(body),
   })
   const parsed = (await response.json()) as { call?: CallBody }
-  return { status: response.status, call: parsed.call }
+  // The Prospect picks up; the Disclosure, bridge and Transcript follow from that report.
+  if (parsed.call) {
+    await reportStatus(t, telephony, org, parsed.call.id, 'in-progress')
+  }
+  const call = parsed.call && ((await t.deps.calls.get(org, parsed.call.id as never)) as CallBody)
+  return { status: response.status, call: call || parsed.call }
 }
 
 /** Sends enough audio on a track for every scripted turn to be heard. */
@@ -101,8 +107,9 @@ describe('the live Transcript of a Copilot Call', () => {
 
   it('opens nothing and saves no turn when the Disclosure failed', async () => {
     telephony.failNext('playDisclosure', TELEPHONY_ERROR_CODES.unavailable)
-    const { status } = await place({ to: PROSPECT, copilot: true })
-    expect(status).toBe(502)
+    const { status, call } = await place({ to: PROSPECT, copilot: true })
+    expect(status).toBe(201)
+    expect(call?.state).toBe('failed')
     expect(t.deps.transcribe.streams()).toEqual([])
     expect(telephony.calls().length).toBeGreaterThan(0)
   })

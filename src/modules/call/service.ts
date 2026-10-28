@@ -17,7 +17,7 @@ import {
   voiceCallCursorSchema,
   type WrapUpRequest,
 } from 'tula-closeline-contract'
-import { TELEPHONY_ERROR_CODES, TelephonyError } from 'tula-closeline-kit'
+import { TELEPHONY_ERROR_CODES, TelephonyError, type TelephonyEventType } from 'tula-closeline-kit'
 import type { Container } from '~/container'
 import { describeError } from '~/describe-error'
 import { domainError } from '~/http/domain-error'
@@ -93,6 +93,12 @@ export const HANDOFF_DISCLOSURE_WORDING = {
   text: 'One moment. I am connecting you with a sales representative. This call is being recorded, and an AI assistant is helping on this call, for quality and training purposes. By staying on the line you agree to the recording.',
 } as const
 
+/**
+ * Extra time the Disclosure step gets on top of the provider deadline: the provider waits for the
+ * words to be spoken (up to about 18 s for the longest wording), which the plain deadline cannot hold.
+ */
+export const DISCLOSURE_SPEECH_ALLOWANCE_MS = 20_000
+
 const E164 = /^\+[1-9][0-9]{6,14}$/
 
 /** The most Calls a page of the list may hold, one more than the page is read to find the next. */
@@ -123,16 +129,21 @@ function requireVoiceRole(caller: Caller): void {
 
 /** Drops what is internal to the service (the provider's id) before a Call leaves it. */
 function toCall(stored: StoredCall): VoiceCall {
-  const { providerCallSid: _providerCallSid, agentCostMicroCents: _cost, ...call } = stored
+  const {
+    providerCallSid: _providerCallSid,
+    agentCostMicroCents: _cost,
+    copilot: _copilot,
+    ...call
+  } = stored
   return call
 }
 
 /** Runs one provider call under the deadline; a call that outlives it is `telephony.unavailable`. */
 export async function withinDeadline<T>(
   deps: CallDeps,
-  call: (options: { timeoutMs: number }) => Promise<T>
+  call: (options: { timeoutMs: number }) => Promise<T>,
+  timeoutMs = deps.numberTimeoutMs
 ): Promise<T> {
-  const timeoutMs = deps.numberTimeoutMs
   let timer: ReturnType<typeof setTimeout> | undefined
   const expired = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(
@@ -234,16 +245,16 @@ async function failCall(
 }
 
 /**
- * Takes a `ringing` outbound Call through the provider: place it, then {@link finish} it.
+ * Dials a `ringing` outbound Call and leaves it ringing. The Disclosure is not played here: it
+ * plays when the provider reports the Prospect answered ({@link onProviderStatus}), because a
+ * Disclosure sent to a call nobody has picked up is cancelled by the carrier.
  */
-async function walk(
+async function dial(
   deps: CallDeps,
   caller: Caller,
-  membershipId: string,
   call: StoredCall,
   from: string,
-  to: string,
-  copilot: boolean
+  to: string
 ): Promise<StoredCall> {
   const org = caller.organizationId
   let providerCallId: string | undefined
@@ -256,12 +267,80 @@ async function walk(
     )
     providerCallId = placed.providerCallId
     await deps.calls.setProviderCallSid(org, call.id, providerCallId)
-    await deps.calls.transition(org, call.id, { to: 'connecting', at: deps.clock.now() })
   } catch (error) {
     await failCall(deps, org, call, reasonOf(error), providerCallId)
     throw domainError(ERRORS['server.unavailable'])
   }
-  return finish(deps, org, membershipId, call, providerCallId, copilot)
+  return { ...call, providerCallSid: providerCallId }
+}
+
+/** The work still running after a provider callback returned; tests wait on it with {@link idle}. */
+const background = new Set<Promise<unknown>>()
+
+/** Resolves when every background Call setup started by a provider callback has finished. */
+export async function idle(): Promise<void> {
+  while (background.size > 0) {
+    await Promise.allSettled([...background])
+  }
+}
+
+/** How each provider status that ends a ringing Call is recorded as its failure reason. */
+const RINGING_FAILURES: Partial<Record<TelephonyEventType, VoiceCallFailureReason>> = {
+  no_answer: 'no_answer',
+  busy: 'busy',
+  failed: 'provider_error',
+  completed: 'carrier_dropped',
+}
+
+/**
+ * Applies the provider's status report to an outbound Call that is still ringing: answered starts
+ * the Disclosure, bridge and Recording in the background (the webhook must answer well inside the
+ * provider's timeout), and a refusal, no answer or hang-up before answer fails the Call. Safe to
+ * run twice for one event: only the `ringing` to `connecting` move starts the setup. Inbound Calls
+ * and Calls past `ringing` are left alone. The setup is in-process; a crash after the claim leaves
+ * the Call `connecting` until `sweepStaleOutbound` fails it.
+ */
+export async function onProviderStatus(
+  deps: CallDeps,
+  organizationId: Caller['organizationId'],
+  callId: VoiceCall['id'],
+  type: TelephonyEventType
+): Promise<void> {
+  const stored = await deps.calls.get(organizationId, callId)
+  if (stored === undefined || stored.direction !== 'outbound' || stored.state !== 'ringing') {
+    return
+  }
+  const providerCallId = stored.providerCallSid
+  if (type === 'answered') {
+    if (providerCallId === null || stored.repMembershipId === null) {
+      // The dial has not stored the provider's id yet; if the provider does not retry the 5xx,
+      // `sweepStaleOutbound` fails the Call.
+      throw domainError(ERRORS['server.unavailable'])
+    }
+    const claimed = await deps.calls
+      .transition(organizationId, callId, { to: 'connecting', at: deps.clock.now() })
+      .catch((error: unknown) => {
+        if (error instanceof InvalidTransitionError) {
+          return undefined
+        }
+        throw error
+      })
+    if (claimed === undefined) {
+      return
+    }
+    const membershipId = stored.repMembershipId
+    const setup = finish(deps, organizationId, membershipId, stored, providerCallId, stored.copilot)
+    const task = setup.catch((error: unknown) =>
+      deps.logger.warn('call.setup.failed', { callId, error: describeError(error) })
+    )
+    background.add(task)
+    task.finally(() => background.delete(task))
+    return
+  }
+  const reason = RINGING_FAILURES[type]
+  if (reason !== undefined) {
+    await failCall(deps, organizationId, stored, reason, undefined)
+  }
 }
 
 /**
@@ -283,17 +362,20 @@ async function finish(
     await deps.calls.transition(org, call.id, { to: 'disclosing', at: deps.clock.now() })
 
     phase = 'disclosure'
-    const played = await withinDeadline(deps, (options) =>
-      deps.telephony.playDisclosure(
-        {
-          organizationId: org,
-          providerCallId,
-          wordingVersion: wording.version,
-          text: wording.text,
-          aiAssisted: wording.aiAssisted,
-        },
-        options
-      )
+    const played = await withinDeadline(
+      deps,
+      (options) =>
+        deps.telephony.playDisclosure(
+          {
+            organizationId: org,
+            providerCallId,
+            wordingVersion: wording.version,
+            text: wording.text,
+            aiAssisted: wording.aiAssisted,
+          },
+          options
+        ),
+      deps.numberTimeoutMs + DISCLOSURE_SPEECH_ALLOWANCE_MS
     )
     await deps.calls.recordDisclosure(org, call.id, {
       wordingVersion: played.wordingVersion,
@@ -341,7 +423,8 @@ async function finish(
 
 /**
  * Places a Call from the Rep's browser: records it `ringing` under the `Idempotency-Key`, then
- * dials, plays the Disclosure, bridges and records. A repeat of the key answers the stored first
+ * dials and leaves it ringing; the Disclosure, bridge and Recording follow when the Prospect
+ * answers. A repeat of the key answers the stored first
  * answer (`replayed`) and dials nothing. A Contact Check denial would be a warning, never a refusal
  * (ADR 0003); the check is not wired yet, so `warnings` is empty.
  */
@@ -380,6 +463,7 @@ export async function place(
             repMembershipId: membershipId,
             prospectId: request.prospectId ?? null,
             prospectNumber: to,
+            copilot: request.copilot ?? false,
             idempotency: {
               key: new Bun.CryptoHasher('sha256')
                 .update(`${caller.userId}|${PLACE_CALL_ROUTE}|${idempotencyKey}`)
@@ -399,14 +483,17 @@ export async function place(
     const call = current === undefined ? answer.body.call : toCall(current)
     return { ...answer, body: { ...answer.body, call }, call }
   }
-  const final = await walk(
+  const final = await dial(
     deps,
     caller,
-    membershipId,
-    { ...answer.body.call, providerCallSid: null, agentCostMicroCents: 0 },
+    {
+      ...answer.body.call,
+      providerCallSid: null,
+      agentCostMicroCents: 0,
+      copilot: request.copilot ?? false,
+    },
     line.number,
-    to,
-    request.copilot ?? false
+    to
   )
   return { ...answer, call: toCall(final) }
 }

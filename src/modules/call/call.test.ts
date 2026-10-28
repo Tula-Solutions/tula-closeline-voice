@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it } from 'bun:test'
 import { formatId } from 'tula-closeline-contract'
 import { TELEPHONY_ERROR_CODES } from 'tula-closeline-kit'
 import { createMemoryTelephony, type MemoryTelephony } from 'tula-closeline-kit/testing'
+import { sweepStaleOutbound } from '~/modules/call/missed-sweep'
 import * as Calls from '~/modules/call/service'
+import { createCopilotRuntime } from '~/modules/transcript/runtime'
 import {
   createTestApp,
   identityOf,
   newOrganizationId,
+  reportStatus,
+  ringUntilAnswered,
   type TestApp,
   type TestIdentity,
 } from '~/testing'
@@ -76,17 +80,63 @@ async function place(who: TestIdentity, body: unknown, key: string | null = next
   return { status: response.status, body: text === '' ? undefined : JSON.parse(text) }
 }
 
+/** The Prospect picks up: the provider reports `in-progress` and the setup runs to its end. */
+const answer = (callId: string, status = 'in-progress', sequence = '1') =>
+  reportStatus(t, telephony, organizationId, callId, status, sequence)
+
+/** Places a Call and has the Prospect answer, so it has run to `live` or to its failure. */
+async function placeAnswered(who: TestIdentity, body: unknown) {
+  const placed = await place(who, body)
+  await answer((placed.body as PlacedBody).call.id)
+  return placed
+}
+
+const stateOf = async (callId: string) =>
+  (await t.call(rep, 'GET', `/calls/${callId}`)).body as CallBody
+
 const codeOf = (body: unknown): string => (body as ErrorBody).error.code
 
 describe('placing a Call', () => {
-  it('plays the Disclosure before the Rep is bridged and the Recording starts, then goes live', async () => {
+  it('leaves the Call ringing and plays nothing until the Prospect answers', async () => {
+    const ringing = ringUntilAnswered(createMemoryTelephony())
+    telephony = ringing
+    t = await createTestApp({ telephony })
+    organizationId = newOrganizationId()
+    admin = identityOf('admin', organizationId)
+    rep = identityOf('rep', organizationId)
+    await lineFor(membershipFor(rep))
     const { status, body } = await place(rep, { to: PROSPECT })
     const placed = body as PlacedBody
     expect(status).toBe(201)
-    expect(placed.call.state).toBe('live')
+    expect(placed.call.state).toBe('ringing')
+    expect(placed.call.disclosure.wordingVersion).toBeNull()
+    expect(telephony.operations.map((entry) => entry.operation)).toEqual(['placeCall'])
+
+    await answer(placed.call.id, 'ringing', '0')
+    expect((await stateOf(placed.call.id)).state).toBe('ringing')
+    expect(telephony.operations.map((entry) => entry.operation)).toEqual(['placeCall'])
+
+    const sid = (await t.deps.calls.get(organizationId, placed.call.id as never))?.providerCallSid
+    ringing.answer(sid as string)
+    await answer(placed.call.id)
+    expect((await stateOf(placed.call.id)).state).toBe('live')
+    expect(telephony.operations.map((entry) => entry.operation)).toEqual([
+      'placeCall',
+      'playDisclosure',
+      'bridge',
+      'startRecording',
+    ])
+  })
+
+  it('plays the Disclosure before the Rep is bridged and the Recording starts, then goes live', async () => {
+    const { status, body } = await placeAnswered(rep, { to: PROSPECT })
+    expect(status).toBe(201)
+    const placed = body as PlacedBody
     expect(placed.warnings).toEqual([])
-    expect(placed.call.disclosure.wordingVersion).toBe(Calls.DISCLOSURE_WORDING.version)
-    expect(placed.call.disclosure.aiAssisted).toBe(false)
+    const call = await stateOf(placed.call.id)
+    expect(call.state).toBe('live')
+    expect(call.disclosure.wordingVersion).toBe(Calls.DISCLOSURE_WORDING.version)
+    expect(call.disclosure.aiAssisted).toBe(false)
 
     const order = telephony.operations.map((entry) => entry.operation)
     expect(order).toEqual(['placeCall', 'playDisclosure', 'bridge', 'startRecording'])
@@ -97,6 +147,49 @@ describe('placing a Call', () => {
     expect(kinds.indexOf('disclosure_played')).toBeLessThan(kinds.indexOf('recording_started'))
   })
 
+  it('does not set the Disclosure up twice for a repeated or late answered report', async () => {
+    const { body } = await placeAnswered(rep, { to: PROSPECT })
+    const id = (body as PlacedBody).call.id
+    await answer(id)
+    await answer(id, 'in-progress', '2')
+    await answer(id, 'completed', '3')
+    const ops = telephony.operations.map((entry) => entry.operation)
+    expect(ops.filter((op) => op === 'playDisclosure')).toHaveLength(1)
+    expect(ops.filter((op) => op === 'bridge')).toHaveLength(1)
+    expect((await stateOf(id)).state).toBe('live')
+  })
+
+  it.each([
+    ['no-answer', 'no_answer'],
+    ['busy', 'busy'],
+    ['failed', 'provider_error'],
+    ['canceled', 'carrier_dropped'],
+  ])(
+    'fails a ringing Call the provider reports %s, and plays no Disclosure',
+    async (report, reason) => {
+      const { body } = await place(rep, { to: PROSPECT })
+      const id = (body as PlacedBody).call.id
+      await answer(id, report)
+      const call = await stateOf(id)
+      expect(call.state).toBe('failed')
+      expect(call.failureReason).toBe(reason)
+      await answer(id, 'in-progress', '2')
+      expect((await stateOf(id)).state).toBe('failed')
+      expect(telephony.operations.map((entry) => entry.operation)).not.toContain('playDisclosure')
+    }
+  )
+
+  it('uses the stored Copilot setting when another instance receives the answer', async () => {
+    const { body } = await place(rep, { to: PROSPECT, copilot: true })
+    const id = (body as PlacedBody).call.id
+    // A fresh process memory stands for another instance or a restart.
+    Object.assign(t.deps, { copilot: createCopilotRuntime() })
+    await answer(id)
+    const call = await stateOf(id)
+    expect(call.state).toBe('live')
+    expect(call.disclosure.aiAssisted).toBe(true)
+  })
+
   it('never returns the provider id', async () => {
     const { body } = await place(rep, { to: PROSPECT })
     expect(JSON.stringify(body)).not.toContain('providerCallSid')
@@ -104,11 +197,9 @@ describe('placing a Call', () => {
 
   it('ends the Call failed, never live, when the Disclosure does not play', async () => {
     telephony.script(PROSPECT, { kind: 'hangs_up', when: 'during_disclosure' })
-    const { status, body } = await place(rep, { to: PROSPECT })
-    expect(status).toBe(502)
-    expect(codeOf(body)).toBe('call.disclosure_failed')
-    const callId = (body as ErrorBody).error.details?.callId as string
-    const call = (await t.call(rep, 'GET', `/calls/${callId}`)).body as CallBody
+    const { body } = await placeAnswered(rep, { to: PROSPECT })
+    const callId = (body as PlacedBody).call.id
+    const call = await stateOf(callId)
     expect(call.state).toBe('failed')
     expect(call.failureReason).toBe('disclosure_failed')
     const events = await t.deps.calls.events(organizationId, callId as never)
@@ -136,8 +227,8 @@ describe('placing a Call', () => {
 
   it('fails a Call as provider_error when the Rep cannot be bridged after the Disclosure', async () => {
     telephony.failNext('bridge', TELEPHONY_ERROR_CODES.unavailable)
-    const { status } = await place(rep, { to: PROSPECT })
-    expect(status).toBe(503)
+    const { status } = await placeAnswered(rep, { to: PROSPECT })
+    expect(status).toBe(201)
     const page = (await t.call(rep, 'GET', '/calls')).body as PageBody
     expect(page.items[0]?.state).toBe('failed')
     expect(page.items[0]?.failureReason).toBe('provider_error')
@@ -158,7 +249,9 @@ describe('placing a Call', () => {
   it('answers a replay with the Call as it is now, not as it was when placed', async () => {
     telephony.script(PROSPECT, { kind: 'hangs_up', when: 'during_disclosure' })
     const key = nextKey()
-    expect((await place(rep, { to: PROSPECT }, key)).status).toBe(502)
+    const first = await place(rep, { to: PROSPECT }, key)
+    expect(first.status).toBe(201)
+    await answer((first.body as PlacedBody).call.id)
     const again = await place(rep, { to: PROSPECT }, key)
     expect(again.status).toBe(200)
     expect((again.body as PlacedBody).call.state).toBe('failed')
@@ -285,7 +378,7 @@ describe('wrapping up a Call', () => {
   let callId: string
 
   beforeEach(async () => {
-    callId = ((await place(rep, { to: PROSPECT })).body as PlacedBody).call.id
+    callId = ((await placeAnswered(rep, { to: PROSPECT })).body as PlacedBody).call.id
   })
 
   const wrap = (who: TestIdentity) =>
@@ -317,5 +410,42 @@ describe('wrapping up a Call', () => {
     expect(ok.status).toBe(200)
     expect(JSON.stringify(ok.body)).toContain('Booked a demo')
     expect((await wrap(admin)).status).toBe(200)
+  })
+})
+
+describe('sweeping outbound Calls that never progressed', () => {
+  const sweepOutbound = (after: string) => {
+    t.deps.clock.advance(after)
+    return sweepStaleOutbound(t.deps, { maxOrganizations: 100, shouldStop: () => false })
+  }
+
+  it('fails a Call still ringing long after the ring time, and hangs up', async () => {
+    const { body } = await place(rep, { to: PROSPECT })
+    const id = (body as PlacedBody).call.id
+    expect(await sweepOutbound('60s')).toBe(0)
+    expect(await sweepOutbound('60s')).toBe(1)
+    const call = await stateOf(id)
+    expect(call.state).toBe('failed')
+    expect(call.failureReason).toBe('no_answer')
+    expect(telephony.operations.map((entry) => entry.operation)).toContain('hangUp')
+    expect(await sweepOutbound('60s')).toBe(0)
+  })
+
+  it('fails a Call stuck connecting as provider_error', async () => {
+    const { body } = await place(rep, { to: PROSPECT })
+    const id = (body as PlacedBody).call.id
+    await t.deps.calls.transition(organizationId, id as never, {
+      to: 'connecting',
+      at: t.deps.clock.now(),
+    })
+    expect(await sweepOutbound('3m')).toBe(1)
+    expect((await stateOf(id)).failureReason).toBe('provider_error')
+  })
+
+  it('leaves a live Call alone', async () => {
+    const { body } = await placeAnswered(rep, { to: PROSPECT })
+    const id = (body as PlacedBody).call.id
+    expect(await sweepOutbound('3m')).toBe(0)
+    expect((await stateOf(id)).state).toBe('live')
   })
 })

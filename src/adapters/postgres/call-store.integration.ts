@@ -47,6 +47,33 @@ async function callFor(org: OrganizationId, overrides: Partial<NewCall> = {}): P
 }
 
 describe('the Postgres Call store', () => {
+  test('stores the Copilot setting at place time', async () => {
+    const org = newOrganization()
+    const on = await calls.insert(org, await callFor(org, { copilot: true }))
+    const off = await calls.insert(org, await callFor(org))
+    expect((await calls.get(org, on.id))?.copilot).toBe(true)
+    expect((await calls.get(org, off.id))?.copilot).toBe(false)
+  })
+
+  test('fails stale outbound Calls by their state, for their own Organization only', async () => {
+    const org = newOrganization()
+    const other = newOrganization()
+    const ringing = await calls.insert(org, await callFor(org))
+    const connecting = await calls.insert(org, await callFor(org))
+    await calls.transition(org, connecting.id, { to: 'connecting', at: at(1) })
+    const fresh = await calls.insert(org, await callFor(org, { createdAt: at(100) }))
+    const foreign = await calls.insert(other, await callFor(other))
+    const found = await calls.organizationsWithStaleOutbound(at(30), null, 500)
+    expect(found).toContain(org)
+    const failed = await calls.failStaleOutbound(org, at(30), at(31), 100)
+    const reasons = Object.fromEntries(failed.map((call) => [call.id, call.failureReason]))
+    expect(reasons).toEqual({ [ringing.id]: 'no_answer', [connecting.id]: 'provider_error' })
+    expect(await calls.failStaleOutbound(org, at(30), at(32), 100)).toEqual([])
+    expect((await calls.get(org, ringing.id))?.state).toBe('failed')
+    expect((await calls.get(org, fresh.id))?.state).toBe('ringing')
+    expect((await calls.get(other, foreign.id))?.state).toBe('ringing')
+  })
+
   test('inserts a ringing Call, reads it back and logs the first state', async () => {
     const org = newOrganization()
     const input = await callFor(org)

@@ -6803,7 +6803,7 @@
           "calls"
         ],
         "summary": "Place a Call to a Prospect",
-        "description": "Any voice role. Needs an `Idempotency-Key`: the same key with the same request places one Call and answers 200 with it, for 24 hours. The Disclosure plays before the Rep is bridged and before the recording starts, on every Call; there is no setting for it. A Contact Check denial is a warning on the placed Call, never a refusal.",
+        "description": "Any voice role. Needs an `Idempotency-Key`: the same key with the same request places one Call and answers 200 with it, for 24 hours. The Call is dialled and answers `ringing`; the Disclosure plays only once the Prospect answers, before the Rep is bridged and before the recording starts, on every Call; there is no setting for it. Poll `GET /v1/calls/{id}` for `live` or `failed`. A Contact Check denial is a warning on the placed Call, never a refusal.",
         "security": [
           {
             "accessToken": []
@@ -7113,7 +7113,7 @@
             }
           },
           "201": {
-            "description": "The Call, `live` once the Disclosure has played and the Rep is bridged.",
+            "description": "The Call, `ringing`; it goes `live` after the Prospect answers.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7611,44 +7611,6 @@
           },
           "500": {
             "description": "Something went wrong on our side.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "maxLength": 100,
-                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 2000
-                        },
-                        "details": {
-                          "type": "object",
-                          "additionalProperties": {}
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ]
-                }
-              }
-            }
-          },
-          "502": {
-            "description": "call.disclosure_failed: the Disclosure did not play; the Call failed.",
             "content": {
               "application/json": {
                 "schema": {

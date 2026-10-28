@@ -37,8 +37,10 @@ const place = createRoute({
   summary: 'Place a Call to a Prospect',
   description:
     'Any voice role. Needs an `Idempotency-Key`: the same key with the same request places one ' +
-    'Call and answers 200 with it, for 24 hours. The Disclosure plays before the Rep is bridged ' +
-    'and before the recording starts, on every Call; there is no setting for it. A Contact Check ' +
+    'Call and answers 200 with it, for 24 hours. The Call is dialled and answers `ringing`; ' +
+    'the Disclosure plays only once the Prospect answers, before the Rep is bridged and before ' +
+    'the recording starts, on every Call; there is no setting for it. Poll `GET /v1/calls/{id}` ' +
+    'for `live` or `failed`. A Contact Check ' +
     'denial is a warning on the placed Call, never a refusal.',
   security,
   request: {
@@ -47,7 +49,7 @@ const place = createRoute({
   },
   responses: {
     200: placedBody('The Call this Idempotency-Key placed earlier; nothing was dialled again.'),
-    201: placedBody('The Call, `live` once the Disclosure has played and the Rep is bridged.'),
+    201: placedBody('The Call, `ringing`; it goes `live` after the Prospect answers.'),
     400: errorResponse('request.invalid'),
     401: unauthorized,
     403: errorResponse('auth.forbidden'),
@@ -60,7 +62,6 @@ const place = createRoute({
       'call.number_invalid, or request.idempotency_key_reused: the key was used for another request.'
     ),
     500: serverError,
-    502: errorResponse('call.disclosure_failed: the Disclosure did not play; the Call failed.'),
     503: errorResponse('server.unavailable: the telephony provider did not answer.'),
   },
 })
