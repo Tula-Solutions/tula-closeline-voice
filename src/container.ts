@@ -16,7 +16,9 @@ import {
 } from 'tula-closeline-kit'
 import { createBedrockLlm } from 'tula-closeline-kit/llm'
 import { createMemoryTelephony } from 'tula-closeline-kit/testing'
+import { createCoreHttpBookingGateway } from '~/adapters/core-http/booking-gateway'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
+import { createMemoryBookingGateway } from '~/adapters/memory/booking-gateway'
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
@@ -28,9 +30,11 @@ import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import { createPostgresQualificationQuestionStore } from '~/adapters/postgres/qualification-question-store'
+import { createPostgresQualificationStore } from '~/adapters/postgres/qualification-store'
 import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
 import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import {
+  createUnconfiguredBookingGateway,
   createUnconfiguredEvidenceSearch,
   createUnconfiguredNumberProvisioner,
   createUnconfiguredOrganizationDirectory,
@@ -40,6 +44,7 @@ import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
 import type { AgentSettingsStore } from '~/ports/agent-settings-store'
 import type { AgentTurnStore } from '~/ports/agent-turn-store'
+import type { BookingGateway } from '~/ports/booking-gateway'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
@@ -48,6 +53,7 @@ import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 import type { QualificationQuestionStore } from '~/ports/qualification-question-store'
+import type { QualificationStore } from '~/ports/qualification-store'
 import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
@@ -83,6 +89,10 @@ export type Container = {
   questions: QualificationQuestionStore
   /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
   turns: AgentTurnStore
+  /** What Prospects answered to the Qualification questions, and the summary of it. */
+  qualification: QualificationStore
+  /** Free times and Bookings of an Organization, held by core. */
+  booking: BookingGateway
   /** Finds an Organization's own Documents and Moments for the Agent to answer from. */
   evidence: EvidenceSearch
   /** The language model the Agent writes its replies with. */
@@ -189,6 +199,29 @@ function createDirectory(env: Env): OrganizationDirectory {
     : createUnconfiguredOrganizationDirectory()
 }
 
+/**
+ * Picks the booking gateway: core's public booking routes when a link token map is set, in memory
+ * for an unconfigured local run, and otherwise one that fails closed. Core has no route for a
+ * Prospect's contact yet, so outside `local` a booking over HTTP fails (shortcut: add the contact
+ * lookup when core serves it).
+ */
+function createBooking(env: Env): BookingGateway {
+  const tokens = env.BOOKING_LINK_TOKENS
+  if (env.CORE_INTERNAL_URL && tokens) {
+    return createCoreHttpBookingGateway({
+      baseUrl: env.CORE_INTERNAL_URL,
+      linkTokenOf: (organizationId) => tokens[organizationId],
+      contactOf: async () =>
+        env.ENVIRONMENT === 'local'
+          ? { name: 'Local Prospect', email: 'prospect@example.test', timeZone: 'UTC' }
+          : undefined,
+    })
+  }
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryBookingGateway()
+    : createUnconfiguredBookingGateway()
+}
+
 /** Picks evidence search: the Playbook over HTTP when configured, in memory only for an unconfigured local run. */
 function createEvidenceSearch(env: Env): EvidenceSearch {
   if (env.PLAYBOOK_INTERNAL_URL && env.PLAYBOOK_INTERNAL_TOKEN) {
@@ -239,6 +272,8 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     agentSettings: createPostgresAgentSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
+    qualification: createPostgresQualificationStore(database.db),
+    booking: createBooking(env),
     // The Playbook's internal search route; only a local run without PLAYBOOK_INTERNAL_* gets the
     // (empty) in-memory search.
     evidence: createEvidenceSearch(env),

@@ -108,6 +108,77 @@ describe('the conversation engine in text mode', () => {
     expect(result.reply).not.toContain('40 dollars')
   })
 
+  test('a pending Qualification question is asked again when the reply cites nothing', async () => {
+    t.llm.reply(answer({ sources: [] }))
+    const result = await Conversation.converse(
+      t,
+      {
+        organizationId: org,
+        conversation: conversation(),
+        turnIndex: 0,
+        text: 'Hmm, not sure',
+      },
+      {
+        tools: {
+          context: async () => ({
+            pending: {
+              id: formatId('qst', crypto.randomUUID()),
+              prompt: 'How many seats do you need?',
+              kind: 'number' as const,
+              choices: null,
+            },
+            slots: [],
+          }),
+          act: async () => null,
+        },
+      }
+    )
+    expect(result.reply).toBe('How many seats do you need?')
+    expect(result.deferred).toBe(false)
+  })
+
+  test('the model text beside a tool call is never spoken, only what the tool says', async () => {
+    t.llm.reply(
+      answer({
+        reply: 'It costs 5 dollars and we guarantee a refund.',
+        sources: [],
+        toolCall: { name: 'find_slots', arguments: {} },
+      })
+    )
+    const result = await Conversation.converse(
+      t,
+      { organizationId: org, conversation: conversation(), turnIndex: 0, text: 'Book me' },
+      {
+        tools: {
+          context: async () => ({ pending: null, slots: [] }),
+          act: async () => ({ say: 'I can offer Monday.', replace: false }),
+        },
+      }
+    )
+    expect(result.reply).toBe('I can offer Monday.')
+  })
+
+  test('a tool the engine could not carry out falls back to the deferral', async () => {
+    t.llm.reply(
+      answer({
+        reply: 'It costs 5 dollars.',
+        sources: [],
+        toolCall: { name: 'book', arguments: { slotId: 'x' } },
+      })
+    )
+    const result = await Conversation.converse(
+      t,
+      { organizationId: org, conversation: conversation(), turnIndex: 0, text: 'Book me' },
+      {
+        tools: {
+          context: async () => ({ pending: null, slots: [] }),
+          act: async () => null,
+        },
+      }
+    )
+    expect(result.reply).not.toContain('5 dollars')
+  })
+
   test('a source that was not retrieved is rejected', async () => {
     t.llm.reply(answer({ sources: ['P1', 'P9'] }))
     const result = await Conversation.converse(t, {
