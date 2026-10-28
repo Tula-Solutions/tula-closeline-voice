@@ -312,7 +312,9 @@ export async function onProviderStatus(
   const providerCallId = stored.providerCallSid
   if (type === 'answered') {
     if (providerCallId === null || stored.repMembershipId === null) {
-      // The dial has not stored the provider's id yet: a 5xx makes the provider send this again.
+      // shortcut: the dial has not stored the provider's id yet; the provider may not retry a 5xx,
+      // and no sweep covers outbound ringing Calls, so a lost answer leaves the Call ringing.
+      // Upgrade with an outbound ringing/connecting sweep (follow-up).
       throw domainError(ERRORS['server.unavailable'])
     }
     const claimed = await deps.calls
