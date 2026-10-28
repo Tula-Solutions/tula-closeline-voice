@@ -334,19 +334,23 @@ describe('GET /v1/calls/{callId}/copilot/stream', () => {
     speak(id, 'prospect')
     await Transcript.settled(t.deps, id)
     const [card] = await t.deps.copilotCards.list(org, id, 0, 10)
-    const reading = frames(await open(rep, id), (s) =>
-      s.some((f) => f.includes('copilot.card_updated'))
-    )
-    // Let the stream send the retrieval card (it polls every few ms), then upgrade it in place.
-    await Bun.sleep(100)
     const { score: _score, ...quote } = found[0] ?? ({} as never)
-    await t.deps.copilotCards.upgrade(org, id, card?.id as never, {
-      kind: 'next_step',
-      nextStep: 'Book a pilot.',
-      citedMoments: [{ callId: found[0]?.callId, dealRecordId: found[0]?.dealRecordId }] as never,
-      quotes: [quote] as never,
+    let upgraded: Promise<unknown> | undefined
+    // Upgrade the card in place only once the stream has sent it, so the update is not a race.
+    const seen = await frames(await open(rep, id), (s) => {
+      if (upgraded === undefined && s.some((f) => /event: copilot\.card\b(?!_)/.test(f))) {
+        upgraded = t.deps.copilotCards.upgrade(org, id, card?.id as never, {
+          kind: 'next_step',
+          nextStep: 'Book a pilot.',
+          citedMoments: [
+            { callId: found[0]?.callId, dealRecordId: found[0]?.dealRecordId },
+          ] as never,
+          quotes: [quote] as never,
+        })
+      }
+      return s.some((f) => f.includes('copilot.card_updated'))
     })
-    const seen = await reading
+    await upgraded
     expect(seen.find((f) => f.includes('copilot.card_updated'))).toContain('Book a pilot.')
   })
 
