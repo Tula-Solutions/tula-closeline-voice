@@ -2,6 +2,7 @@ import { ERRORS } from 'tula-closeline-contract'
 import type { StreamingTranscribePort, TelephonyPort } from 'tula-closeline-kit'
 import { AppError, CONTACT_UNAVAILABLE, type ContactGuard } from 'tula-closeline-kit'
 import { BookingFailedError, type BookingGateway } from '~/ports/booking-gateway'
+import type { ChatSites, ConsentRecorder } from '~/ports/chat-sites'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 import type { ProspectDirectory } from '~/ports/prospect-directory'
@@ -55,6 +56,7 @@ export function createUnconfiguredEvidenceSearch(): EvidenceSearch {
   return {
     search: async () => Promise.reject(unavailable()),
     searchMoments: async () => Promise.reject(unavailable()),
+    searchDocuments: async () => Promise.reject(unavailable()),
   }
 }
 
@@ -69,6 +71,19 @@ export function createUnconfiguredBookingGateway(): BookingGateway {
     slots: async () => Promise.reject(new BookingFailedError('booking not configured')),
     book: async () => Promise.reject(new BookingFailedError('booking not configured')),
   }
+}
+
+/** Chat sites for a deployment with no publishable-key resolution yet: every key is unavailable. */
+export function createUnconfiguredChatSites(): ChatSites {
+  return {
+    ofKey: async () => Promise.reject(unavailable()),
+    ofOrganization: async () => Promise.reject(unavailable()),
+  }
+}
+
+/** A consent recorder for a deployment with no core consent route yet: it fails closed. */
+export function createUnconfiguredConsentRecorder(): ConsentRecorder {
+  return { record: async () => Promise.reject(unavailable()) }
 }
 
 /** A Prospect directory for a deployment with no link to core: every lookup fails closed. */

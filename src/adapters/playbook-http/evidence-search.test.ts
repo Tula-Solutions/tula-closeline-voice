@@ -164,3 +164,25 @@ test('searchMoments gives up at its own timeout as server.timeout', async () => 
     code: 'server.timeout',
   })
 })
+
+test('searchDocuments returns the passages with the Playbook evidence and sends the Organization', async () => {
+  const { search, seen } = fake([ok])
+  const found = await search.searchDocuments(ORG, TURNS, 1)
+  expect(found.items[0]?.fileName).toBe('pricing.pdf')
+  expect(found.evidence).toEqual({ chunks: 3, documents: 1 })
+  expect(seen[0]?.headers.get('x-organization-id')).toBe(ORG)
+  expect(seen[0]?.headers.get('authorization')).toBe(`Bearer ${SECRET}`)
+})
+
+test('searchDocuments is never retried and gives up at its own timeout', async () => {
+  const failing = fake([status(503)])
+  await expect(failing.search.searchDocuments(ORG, TURNS, 1)).rejects.toMatchObject({
+    code: 'server.unavailable',
+  })
+  expect(failing.seen).toHaveLength(1)
+  server?.stop(true)
+  const { search } = fake([() => new Promise<Response>(() => {})])
+  await expect(search.searchDocuments(ORG, TURNS, 1)).rejects.toMatchObject({
+    code: 'server.timeout',
+  })
+})

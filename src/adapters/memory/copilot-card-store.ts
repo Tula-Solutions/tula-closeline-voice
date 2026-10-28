@@ -1,22 +1,18 @@
-import { type CopilotCardId, formatId } from 'tula-closeline-contract'
-import {
-  type CopilotCardStore,
-  MAX_CARD_PAGE,
-  type SimilarMomentCard,
-} from '~/ports/copilot-card-store'
+import { type CopilotCard, type CopilotCardId, formatId } from 'tula-closeline-contract'
+import { type CopilotCardStore, MAX_CARD_PAGE, marked } from '~/ports/copilot-card-store'
 
 /** An in-memory {@link CopilotCardStore} for tests and local runs. */
 export function createMemoryCopilotCardStore(): CopilotCardStore {
-  const byCall = new Map<string, SimilarMomentCard[]>()
+  const byCall = new Map<string, CopilotCard[]>()
+  const updatedAt = new Map<string, Date>()
   const keyOf = (organizationId: string, callId: string) => `${organizationId}\u0000${callId}`
   return {
     async append(organizationId, callId, card) {
       const cards = byCall.get(keyOf(organizationId, callId)) ?? []
       byCall.set(keyOf(organizationId, callId), cards)
-      const stored: SimilarMomentCard = {
-        kind: 'similar_moment',
+      const base = {
         id: formatId('ccard', crypto.randomUUID()) as CopilotCardId,
-        callId: callId as SimilarMomentCard['callId'],
+        callId: callId as CopilotCard['callId'],
         sequence: cards.length + 1,
         evidence: card.evidence,
         citedMoments: card.citedMoments,
@@ -26,14 +22,48 @@ export function createMemoryCopilotCardStore(): CopilotCardStore {
         dismissed: false,
         pinned: false,
       }
+      const stored: CopilotCard = card.source
+        ? { ...base, kind: 'document', source: card.source }
+        : { ...base, kind: 'similar_moment' }
       cards.push(stored)
       return structuredClone(stored)
     },
-    async list(organizationId, callId, afterSequence, limit) {
+    async upgrade(organizationId, callId, cardId, composed) {
+      const cards = byCall.get(keyOf(organizationId, callId)) ?? []
+      const at = cards.findIndex((card) => card.id === cardId && card.kind === 'similar_moment')
+      const old = cards[at]
+      if (old === undefined) {
+        return undefined
+      }
+      const { kind: _kind, ...rest } = old
+      const upgraded = { ...rest, ...structuredClone(composed) } as CopilotCard
+      cards[at] = upgraded
+      return structuredClone(upgraded)
+    },
+    async mark(organizationId, callId, cardId, mark) {
+      const cards = byCall.get(keyOf(organizationId, callId)) ?? []
+      const at = cards.findIndex((card) => card.id === cardId)
+      const old = cards[at]
+      if (old === undefined) {
+        return undefined
+      }
+      const next = { ...old, ...marked(old, mark) } as CopilotCard
+      cards[at] = next
+      const changed = JSON.stringify(next) !== JSON.stringify(old)
+      if (changed || !updatedAt.has(cardId)) {
+        // a later change must get a later time, or its event id would repeat
+        const last = updatedAt.get(cardId)?.getTime() ?? 0
+        updatedAt.set(cardId, new Date(Math.max(Date.now(), last + 1)))
+      }
+      return { card: structuredClone(next), changed, updatedAt: updatedAt.get(cardId) as Date }
+    },
+    async list(organizationId, callId, afterSequence, limit, kind) {
       const size = Math.min(Math.max(limit, 1), MAX_CARD_PAGE)
       return structuredClone(
         (byCall.get(keyOf(organizationId, callId)) ?? [])
-          .filter((card) => card.sequence > afterSequence)
+          .filter(
+            (card) => card.sequence > afterSequence && (kind === undefined || card.kind === kind)
+          )
           .slice(0, size)
       )
     },

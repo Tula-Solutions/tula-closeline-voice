@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { RequestId } from 'tula-closeline-contract'
+import { formatId, type RequestId } from 'tula-closeline-contract'
 import { createDb, type Database } from 'tula-closeline-db'
 import {
   type AnyDefinition,
@@ -38,6 +38,7 @@ import {
 import { createCoreHttpBookingGateway } from '~/adapters/core-http/booking-gateway'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
 import { createMemoryBookingGateway } from '~/adapters/memory/booking-gateway'
+import { createMemoryChatSites, createMemoryConsentRecorder } from '~/adapters/memory/chat-sites'
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
@@ -49,7 +50,10 @@ import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-sto
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
+import { createPostgresChatRateLimiter } from '~/adapters/postgres/chat-limits'
+import { createPostgresChatStore } from '~/adapters/postgres/chat-store'
 import { createPostgresCopilotCardStore } from '~/adapters/postgres/copilot-card-store'
+import { createPostgresCopilotSettingsStore } from '~/adapters/postgres/copilot-settings-store'
 import { createPostgresHandoffStore } from '~/adapters/postgres/handoff-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
@@ -61,6 +65,8 @@ import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import { createTwilioNumberProvisioner } from '~/adapters/twilio/number-provisioner'
 import {
   createUnconfiguredBookingGateway,
+  createUnconfiguredChatSites,
+  createUnconfiguredConsentRecorder,
   createUnconfiguredContactGuard,
   createUnconfiguredEvidenceSearch,
   createUnconfiguredOrganizationDirectory,
@@ -86,7 +92,11 @@ import type { BookingGateway } from '~/ports/booking-gateway'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { CallTurnStore } from '~/ports/call-turn-store'
+import type { ChatRateLimiter } from '~/ports/chat-limits'
+import type { ChatSites, ConsentRecorder } from '~/ports/chat-sites'
+import type { ChatStore } from '~/ports/chat-store'
 import type { CopilotCardStore } from '~/ports/copilot-card-store'
+import type { CopilotSettingsStore } from '~/ports/copilot-settings-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { HandoffStore } from '~/ports/handoff-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
@@ -134,10 +144,20 @@ export type Container = {
   contactGuard: ContactGuard
   /** The Inbound Agent settings of every Organization, one row each. */
   agentSettings: AgentSettingsStore
+  /** The Copilot settings of every Organization, one row each. */
+  copilotSettings: CopilotSettingsStore
   /** The Qualification questions of every Organization, in the order the Agent asks them. */
   questions: QualificationQuestionStore
   /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
   turns: AgentTurnStore
+  /** The website Chats of every Organization. */
+  chats: ChatStore
+  /** The per-minute counters that limit the public Chat routes. */
+  chatLimits: ChatRateLimiter
+  /** What a publishable key stands for: its Organization, allowed origins and consent wording. */
+  chatSites: ChatSites
+  /** Records a Chat visitor's Prospect and Contact Consent in core. */
+  consents: ConsentRecorder
   /** The warm Handoffs of Agent Calls to Reps. */
   handoffs: HandoffStore
   /** Waits `ms`; the Handoff ring polls with it, and a test replaces it to answer mid-ring. */
@@ -305,6 +325,43 @@ function createLlm(env: Env, logger: Logger): LlmPort {
   return createBedrockLlm({ region: env.AWS_REGION, logger, models: voiceLlmModels(env) })
 }
 
+/** The publishable key a local run registers for the dev Organization; a key is public by design. */
+export const LOCAL_CHAT_KEY = 'pk_local_chat_0123456789abcdef0123456789abcdef'
+
+/** The Consent Wording a local Chat site shows. */
+const LOCAL_CHAT_WORDING = {
+  id: formatId('cwd', '00000000-0000-4000-8000-000000000001'),
+  version: 1,
+}
+
+/** Picks the chat sites: memory for a local run, otherwise fail closed until the intake service resolves keys. */
+function createChatSites(env: Env, logger: Logger): ChatSites {
+  if (env.ENVIRONMENT !== 'local') {
+    return createUnconfiguredChatSites()
+  }
+  const sites = createMemoryChatSites()
+  if (env.LOCAL_CHAT_ORGANIZATION_ID !== undefined) {
+    const allowedOrigins = (env.LOCAL_CHAT_ORIGINS ?? 'http://localhost:3002,http://127.0.0.1:3002')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin !== '')
+    sites.register(LOCAL_CHAT_KEY, {
+      organizationId: env.LOCAL_CHAT_ORGANIZATION_ID,
+      allowedOrigins,
+      wording: LOCAL_CHAT_WORDING,
+    })
+    logger.info('local chat key registered', { key: LOCAL_CHAT_KEY, allowedOrigins })
+  }
+  return sites
+}
+
+/** Picks the consent recorder: memory for a local run, otherwise fail closed until core has the route. */
+function createConsents(env: Env): ConsentRecorder {
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryConsentRecorder()
+    : createUnconfiguredConsentRecorder()
+}
+
 /** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */
 function createDirectory(env: Env): OrganizationDirectory {
   if (env.CORE_INTERNAL_URL && env.CORE_INTERNAL_TOKEN) {
@@ -449,8 +506,13 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
         : createUnconfiguredProspectDirectory(),
     contactGuard: createContactGuard(env, logger),
     agentSettings: createPostgresAgentSettingsStore(database.db),
+    copilotSettings: createPostgresCopilotSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
+    chats: createPostgresChatStore(database.db),
+    chatLimits: createPostgresChatRateLimiter(database.db),
+    chatSites: createChatSites(env, logger),
+    consents: createConsents(env),
     handoffs: createPostgresHandoffStore(database.db),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     qualification: createPostgresQualificationStore(database.db),

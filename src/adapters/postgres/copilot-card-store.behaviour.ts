@@ -1,14 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { type CallId, type DealRecordId, formatId } from 'tula-closeline-contract'
-import type { CopilotCardStore, NewSimilarMomentCard } from '~/ports/copilot-card-store'
+import type { CopilotCardStore, NewCard } from '~/ports/copilot-card-store'
 import { newOrganizationId } from './call-turn-store.behaviour'
 
 const at = (ms: number) => new Date(Date.parse('2026-01-01T00:00:00.000Z') + ms)
 
-const card = (
-  shownAt: Date,
-  cited = formatId('call', crypto.randomUUID())
-): NewSimilarMomentCard => {
+const card = (shownAt: Date, cited = formatId('call', crypto.randomUUID())): NewCard => {
   const callId = cited as CallId
   const dealRecordId = formatId('deal', crypto.randomUUID()) as DealRecordId
   return {
@@ -60,6 +57,33 @@ export function copilotCardStoreBehaviour(name: string, make: () => CardHarness)
       expect(await store.list(org, call, 0, 2)).toHaveLength(2)
     })
 
+    test('marks a card to an end state, once, in its own Organization and Call only', async () => {
+      const { store, newCall } = make()
+      const org = newOrganizationId()
+      const call = await newCall(org)
+      const other = await newCall(org)
+      const a = await store.append(org, call, card(at(0)))
+      const first = await store.mark(org, call, a.id, { rating: 'useful', pinned: true })
+      expect(first?.changed).toBe(true)
+      expect(first?.card).toMatchObject({ rating: 'useful', pinned: true, dismissed: false })
+      expect((await store.mark(org, call, a.id, { rating: 'useful', pinned: true }))?.changed).toBe(
+        false
+      )
+      const dismissed = await store.mark(org, call, a.id, { dismissed: true })
+      expect(dismissed?.card).toMatchObject({ rating: 'useful', pinned: false, dismissed: true })
+      expect(await store.mark(org, other, a.id, { rating: null })).toBeUndefined()
+      expect(await store.mark(newOrganizationId(), call, a.id, { rating: null })).toBeUndefined()
+    })
+
+    test('lists only the asked kind', async () => {
+      const { store, newCall } = make()
+      const org = newOrganizationId()
+      const call = await newCall(org)
+      await store.append(org, call, card(at(0)))
+      expect(await store.list(org, call, 0, 10, 'objection')).toEqual([])
+      expect(await store.list(org, call, 0, 10, 'similar_moment')).toHaveLength(1)
+    })
+
     test('tallies the count and the cards shown since a time', async () => {
       const { store, newCall } = make()
       const org = newOrganizationId()
@@ -71,6 +95,48 @@ export function copilotCardStoreBehaviour(name: string, make: () => CardHarness)
       expect(tally.count).toBe(2)
       expect(tally.recent.map((r) => r.shownAt.getTime())).toEqual([at(30000).getTime()])
       expect(tally.recent[0]?.citedMoments).toHaveLength(1)
+    })
+
+    test('upgrades only a retrieval card, in place, and keeps its number and evidence', async () => {
+      const { store, newCall } = make()
+      const org = newOrganizationId()
+      const call = await newCall(org)
+      const first = card(at(0))
+      const shown = await store.append(org, call, first)
+      const composed = {
+        kind: 'objection' as const,
+        objectionType: 'price' as const,
+        response: 'Show the payback in months.',
+        citedMoments: first.citedMoments,
+        quotes: first.quotes,
+      }
+      const upgraded = await store.upgrade(org, call, shown.id, composed)
+      expect(upgraded).toMatchObject({
+        kind: 'objection',
+        objectionType: 'price',
+        response: 'Show the payback in months.',
+        id: shown.id,
+        sequence: 1,
+        evidence: { moments: 3, deals: 2 },
+      })
+      expect((await store.list(org, call, 0, 10))[0]).toEqual(upgraded)
+      // Already upgraded, another Organization's, or unknown: nothing changes.
+      expect(await store.upgrade(org, call, shown.id, composed)).toBeUndefined()
+      expect(await store.upgrade(newOrganizationId(), call, shown.id, composed)).toBeUndefined()
+    })
+
+    test('stores a card with a Document source as a document card', async () => {
+      const { store, newCall } = make()
+      const org = newOrganizationId()
+      const call = await newCall(org)
+      const source = {
+        documentId: formatId('doc', crypto.randomUUID()),
+        page: 2,
+        passage: 'The plan costs 10.',
+      }
+      const shown = await store.append(org, call, { ...card(at(0)), source } as NewCard)
+      expect(shown).toMatchObject({ kind: 'document', source })
+      expect((await store.list(org, call, 0, 10))[0]).toEqual(shown)
     })
 
     test('another Organization reads and counts nothing of the Call', async () => {

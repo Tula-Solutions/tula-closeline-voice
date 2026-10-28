@@ -46,6 +46,14 @@ export function createMemoryEvidenceSearch(): MemoryEvidenceSearch {
         moments: structuredClone((held?.moments ?? []).slice(0, limit)),
       }
     },
+    async searchDocuments(organizationId, _turns, limit) {
+      asked.push(organizationId)
+      const all = byOrganization.get(organizationId)?.documents ?? []
+      return structuredClone({
+        items: all.slice(0, limit),
+        evidence: { chunks: all.length, documents: new Set(all.map((d) => d.documentId)).size },
+      })
+    },
     async searchMoments(organizationId, _turns, limit) {
       asked.push(organizationId)
       const held = byOrganization.get(organizationId)

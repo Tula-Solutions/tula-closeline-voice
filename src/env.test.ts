@@ -36,6 +36,7 @@ test('configuration falls back to defaults for everything but the environment', 
     RECORDING_PURGE_MAX_ORGANIZATIONS: 200,
     RECORDING_JOBS_INTERVAL_MS: 2_000,
     RECORDING_MAX_BYTES: 536_870_912,
+    TRUSTED_PROXY_HOPS: 0,
   })
 })
 
@@ -246,4 +247,9 @@ test('LLM_MODEL is optional and must be a bare anthropic model id', () => {
   for (const bad of ['us.anthropic.claude-haiku-4-5-20251001-v1:0', 'gpt-4', '', 'anthropic.x y']) {
     expect(() => loadEnv({ ENVIRONMENT: 'local', LLM_MODEL: bad })).toThrow()
   }
+})
+
+test('trusted proxy hops are 0 to 3', () => {
+  expect(loadEnv({ ENVIRONMENT: 'local', TRUSTED_PROXY_HOPS: '1' }).TRUSTED_PROXY_HOPS).toBe(1)
+  expect(() => loadEnv({ ENVIRONMENT: 'local', TRUSTED_PROXY_HOPS: '4' })).toThrow()
 })

@@ -8,7 +8,8 @@ import {
 /** What an in-flight caller is told to wait, in seconds. */
 const RETRY_AFTER_SECONDS = 1
 
-type Row = { requestHash: string; createdAt: Date; status: number; response: unknown }
+/** `status` is null while the request that holds the key is still running (committed in flight). */
+type Row = { requestHash: string; createdAt: Date; status: number | null; response: unknown }
 
 /** The in-memory store plus what a test asserts on. */
 export type MemoryIdempotencyStore = IdempotencyStore & {
@@ -21,8 +22,8 @@ const rowKey = (organizationId: string, ref: IdempotencyKeyRef): string =>
 
 /**
  * An in-memory {@link IdempotencyStore} for tests and local runs. A transaction's changes show only
- * when it commits; a key another open transaction holds answers in-progress at once instead of
- * waiting.
+ * when it commits; a key another open transaction holds, or one committed in flight, answers
+ * in-progress at once instead of waiting.
  */
 export function createMemoryIdempotencyStore(): MemoryIdempotencyStore {
   const committed = new Map<string, Row & { organizationId: string }>()
@@ -30,12 +31,20 @@ export function createMemoryIdempotencyStore(): MemoryIdempotencyStore {
 
   return {
     count: (organizationId) =>
-      [...committed.values()].filter((row) => row.organizationId === organizationId).length,
+      [...committed.values()].filter(
+        (row) => row.organizationId === organizationId && row.status !== null
+      ).length,
 
     async withOrganization(organizationId, fn) {
       const reserved = new Map<string, { requestHash: string; createdAt: Date }>()
       const completed = new Map<string, Row>()
       const removed = new Set<string>()
+
+      /** A key committed in flight by an earlier transaction, which this one may complete. */
+      const held = (at: string) => {
+        const row = committed.get(at)
+        return row !== undefined && row.status === null ? row : undefined
+      }
 
       const scope: IdempotencyScope = {
         async reserve(request) {
@@ -46,6 +55,9 @@ export function createMemoryIdempotencyStore(): MemoryIdempotencyStore {
           const existing = committed.get(at)
           if (existing !== undefined && !removed.has(at)) {
             if (existing.createdAt >= request.expiredBefore) {
+              if (existing.status === null) {
+                throw new IdempotencyInProgressError(RETRY_AFTER_SECONDS)
+              }
               return existing.requestHash === request.requestHash
                 ? { outcome: 'replay', status: existing.status, response: existing.response }
                 : { outcome: 'reused' }
@@ -59,7 +71,7 @@ export function createMemoryIdempotencyStore(): MemoryIdempotencyStore {
 
         async complete(ref, status, response) {
           const at = rowKey(organizationId, ref)
-          const row = reserved.get(at)
+          const row = reserved.get(at) ?? held(at)
           if (row === undefined || completed.has(at)) {
             throw new Error('The idempotency key is not in flight')
           }
@@ -99,6 +111,11 @@ export function createMemoryIdempotencyStore(): MemoryIdempotencyStore {
         const result = await fn(scope)
         for (const at of removed) {
           committed.delete(at)
+        }
+        for (const [at, row] of reserved) {
+          if (!completed.has(at)) {
+            committed.set(at, { ...row, status: null, response: null, organizationId })
+          }
         }
         for (const [at, row] of completed) {
           committed.set(at, { ...row, organizationId })

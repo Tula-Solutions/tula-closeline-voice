@@ -48,7 +48,16 @@ import {
 } from '~/adapters/memory/call-event-store'
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
+import { createMemoryChatRateLimiter } from '~/adapters/memory/chat-limits'
+import {
+  createMemoryChatSites,
+  createMemoryConsentRecorder,
+  type MemoryChatSites,
+  type MemoryConsentRecorder,
+} from '~/adapters/memory/chat-sites'
+import { createMemoryChatStore } from '~/adapters/memory/chat-store'
 import { createMemoryCopilotCardStore } from '~/adapters/memory/copilot-card-store'
+import { createMemoryCopilotSettingsStore } from '~/adapters/memory/copilot-settings-store'
 import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
@@ -87,6 +96,7 @@ import { publishOnFinal } from '~/modules/recording/jobs'
 import {
   type agentCallEndedMessage,
   type callEndedMessage,
+  type cardRatedMessage,
   eventRegistry,
   type finishRecordingMessage,
   jobRegistry,
@@ -138,6 +148,8 @@ export type TestDeps = Container & {
   transcribe: MemoryStreamingTranscribe
   evidence: MemoryEvidenceSearch
   idempotency: MemoryIdempotencyStore
+  chatSites: MemoryChatSites
+  consents: MemoryConsentRecorder
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
   qualification: MemoryQualificationStore
@@ -156,7 +168,9 @@ export type TestDeps = Container & {
     detach: AgentAudio['detach']
     spoken: Map<string, number[]>
   }
-  events: MemoryQueue<typeof callEndedMessage | typeof agentCallEndedMessage>
+  events: MemoryQueue<
+    typeof callEndedMessage | typeof agentCallEndedMessage | typeof cardRatedMessage
+  >
   jobs: MemoryQueue<typeof finishRecordingMessage>
   /** Every JSON log line written, in order. */
   logLines: string[]
@@ -217,6 +231,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     prospects: createMemoryProspectDirectory(),
     contactGuard: createMemoryContactGuard(),
     agentSettings: createMemoryAgentSettingsStore(),
+    copilotSettings: createMemoryCopilotSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
     qualification: createMemoryQualificationStore(),
     booking: createMemoryBookingGateway(),
@@ -229,6 +244,10 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     evidence: createMemoryEvidenceSearch(),
     llm: createMemoryLlm({ sleep: async () => undefined, random: () => 0 }),
     idempotency: createMemoryIdempotencyStore(),
+    chats: createMemoryChatStore(),
+    chatLimits: createMemoryChatRateLimiter(),
+    chatSites: createMemoryChatSites(),
+    consents: createMemoryConsentRecorder(),
     numbers: createMemoryNumberProvisioner(),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: overrides.telephony ?? createMemoryTelephony(),
