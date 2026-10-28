@@ -7,7 +7,16 @@ import type { TurnTrack } from '~/ports/call-turn-store'
 /** What the media route needs from the container. */
 export type MediaDeps = Pick<
   Container,
-  'calls' | 'callTurns' | 'telephony' | 'transcribe' | 'copilot' | 'clock' | 'logger' | 'env'
+  | 'calls'
+  | 'callTurns'
+  | 'copilotCards'
+  | 'evidence'
+  | 'telephony'
+  | 'transcribe'
+  | 'copilot'
+  | 'clock'
+  | 'logger'
+  | 'env'
 >
 
 /** The Call a media socket was signed for. */

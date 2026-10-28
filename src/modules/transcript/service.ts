@@ -1,7 +1,13 @@
 import type { OrganizationId, VoiceCall } from 'tula-closeline-contract'
+import {
+  MAX_SEARCH_TEXT_CHARACTERS,
+  MAX_SEARCH_TURNS,
+  type SearchTurn,
+} from 'tula-closeline-contract'
 import type { StreamEvent, TranscribeStream, TurnEvent } from 'tula-closeline-kit'
 import type { Container } from '~/container'
 import type { Env } from '~/env'
+import * as Cards from '~/modules/cards/service'
 import type { TranscriptUnavailableReason } from '~/ports/call-store'
 import type { TurnTrack } from '~/ports/call-turn-store'
 import type { OpenTranscript } from './runtime'
@@ -9,7 +15,16 @@ import type { OpenTranscript } from './runtime'
 /** What the live Transcript needs from the container. */
 export type TranscriptDeps = Pick<
   Container,
-  'calls' | 'callTurns' | 'telephony' | 'transcribe' | 'copilot' | 'clock' | 'logger' | 'env'
+  | 'calls'
+  | 'callTurns'
+  | 'copilotCards'
+  | 'evidence'
+  | 'telephony'
+  | 'transcribe'
+  | 'copilot'
+  | 'clock'
+  | 'logger'
+  | 'env'
 >
 
 const TRACKS: readonly TurnTrack[] = ['rep', 'prospect']
@@ -124,7 +139,13 @@ export async function attach(
     return false
   }
   const org = organizationId as OrganizationId
-  const open: OpenTranscript = { streams: {}, saving: {} }
+  const open: OpenTranscript = {
+    streams: {},
+    saving: {},
+    window: [],
+    searchSeq: 0,
+    carding: new Set(),
+  }
   // Claimed before the next await, so a second attach for this Call does nothing.
   deps.copilot.streams.set(callId, open)
   try {
@@ -156,7 +177,7 @@ export async function attach(
             }
             lastSaved = event.sequence
             open.saving[track] = (open.saving[track] ?? Promise.resolve()).then(() =>
-              save(deps, organizationId, callId, track, base, event)
+              save(deps, open, organizationId, callId, track, base, event)
             )
           }
         },
@@ -175,9 +196,51 @@ export async function attach(
   }
 }
 
+/** The most characters of the recent turns one card search reads (the contract's bound). */
+const MAX_WINDOW_CHARACTERS = MAX_SEARCH_TEXT_CHARACTERS
+
+/** Adds a saved turn to the recent turns and, for a Prospect turn, starts a card search. */
+function remember(
+  deps: TranscriptDeps,
+  open: OpenTranscript,
+  organizationId: string,
+  callId: string,
+  track: TurnTrack,
+  text: string
+): void {
+  open.window.push({ role: track, text })
+  while (open.window.length > MAX_SEARCH_TURNS) {
+    open.window.shift()
+  }
+  // The newest turns are kept: a long one is cut from its start to fit the contract's bound.
+  let room = MAX_WINDOW_CHARACTERS
+  const fitted: SearchTurn[] = []
+  for (const turn of [...open.window].reverse()) {
+    if (room <= 0) {
+      break
+    }
+    fitted.unshift({ role: turn.role, text: [...turn.text].slice(-room).join('') })
+    room -= [...turn.text].length
+  }
+  if (track !== 'prospect') {
+    return
+  }
+  const seq = ++open.searchSeq
+  const running = Cards.onProspectTurn(
+    deps,
+    organizationId,
+    callId,
+    fitted,
+    () => open.searchSeq !== seq
+  )
+  open.carding.add(running)
+  void running.finally(() => open.carding.delete(running))
+}
+
 /** Stores one final turn, in order per track. A failed write is logged and the stream goes on. */
 async function save(
   deps: TranscriptDeps,
+  open: OpenTranscript,
   organizationId: string,
   callId: string,
   track: TurnTrack,
@@ -192,6 +255,7 @@ async function save(
   const endMs = Math.max(startMs, clamp(base + (event.words.at(-1)?.endMs ?? 0)))
   try {
     await deps.callTurns.append(organizationId, callId, { track, text, startMs, endMs })
+    remember(deps, open, organizationId, callId, track, text)
   } catch (error) {
     deps.logger.warn('transcript.save_failed', {
       callId,
@@ -223,7 +287,9 @@ export function isOpen(deps: Pick<TranscriptDeps, 'copilot'>, callId: string): b
 
 /** Waits for the turns already heard on a Call to be stored. */
 export async function settled(deps: Pick<TranscriptDeps, 'copilot'>, callId: string) {
-  await Promise.all(Object.values(deps.copilot.streams.get(callId)?.saving ?? {}))
+  const open = deps.copilot.streams.get(callId)
+  await Promise.all(Object.values(open?.saving ?? {}))
+  await Promise.all([...(open?.carding ?? [])])
 }
 
 /** Closes the streams of a Call that ended; the turns already heard are still stored. */

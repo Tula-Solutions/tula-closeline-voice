@@ -1,10 +1,11 @@
 import { ERRORS } from 'tula-closeline-contract'
 import type { StreamingTranscribePort, TelephonyPort } from 'tula-closeline-kit'
-import { AppError } from 'tula-closeline-kit'
+import { AppError, CONTACT_UNAVAILABLE, type ContactGuard } from 'tula-closeline-kit'
 import { BookingFailedError, type BookingGateway } from '~/ports/booking-gateway'
 import type { ChatSites, ConsentRecorder } from '~/ports/chat-sites'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
+import type { ProspectDirectory } from '~/ports/prospect-directory'
 
 const unavailable = (): AppError =>
   new AppError({
@@ -51,7 +52,10 @@ export function createUnconfiguredTelephony(): TelephonyPort {
 
 /** Evidence search for a deployment with no Playbook link for the Agent: every search fails closed. */
 export function createUnconfiguredEvidenceSearch(): EvidenceSearch {
-  return { search: async () => Promise.reject(unavailable()) }
+  return {
+    search: async () => Promise.reject(unavailable()),
+    searchMoments: async () => Promise.reject(unavailable()),
+  }
 }
 
 /** Speech-to-text for a deployment with no vendor key: opening a stream fails closed. */
@@ -78,4 +82,14 @@ export function createUnconfiguredChatSites(): ChatSites {
 /** A consent recorder for a deployment with no core consent route yet: it fails closed. */
 export function createUnconfiguredConsentRecorder(): ConsentRecorder {
   return { record: async () => Promise.reject(unavailable()) }
+}
+
+/** A Prospect directory for a deployment with no link to core: every lookup fails closed. */
+export function createUnconfiguredProspectDirectory(): ProspectDirectory {
+  return { lookup: async () => Promise.reject(unavailable()) }
+}
+
+/** A Contact Check for a deployment with no link to core: every check is denied, never skipped. */
+export function createUnconfiguredContactGuard(): ContactGuard {
+  return { check: async () => CONTACT_UNAVAILABLE }
 }
