@@ -281,6 +281,21 @@ describe('an inbound Call to a Team Line', () => {
   })
 })
 
+describe('an inbound Call to a role Line', () => {
+  it('rings every member holding the role and not one who holds another', async () => {
+    const a = partyIn(organizationId)
+    const b = partyIn(organizationId)
+    const manager = partyIn(organizationId, 'manager')
+    t.deps.directory.addMember(organizationId, manager.membership, 'manager')
+    const number = await lineWith(organizationId, { kind: 'role', role: 'rep' })
+    await ring(number)
+    const [call] = await callsOf()
+    expect((await answer(manager.identity, call?.id as string)).status).toBe(404)
+    expect((await answer(a.identity, call?.id as string)).status).toBe(200)
+    expect(b.membership).not.toBe(a.membership)
+  })
+})
+
 describe('Organization isolation', () => {
   it("never rings Organization A's Reps for Organization B's Team Line", async () => {
     const orgB = newOrganizationId()

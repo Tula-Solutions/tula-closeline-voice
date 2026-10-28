@@ -1521,6 +1521,31 @@
                                   "membershipId"
                                 ],
                                 "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "role"
+                                    ]
+                                  },
+                                  "role": {
+                                    "type": "string",
+                                    "enum": [
+                                      "owner",
+                                      "admin",
+                                      "manager",
+                                      "rep"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "role"
+                                ],
+                                "additionalProperties": false
                               }
                             ]
                           },
@@ -1864,6 +1889,31 @@
                             "membershipId"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "role"
+                              ]
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "owner",
+                                "admin",
+                                "manager",
+                                "rep"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "role"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
@@ -1983,6 +2033,31 @@
                           "required": [
                             "kind",
                             "membershipId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "role"
+                              ]
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "owner",
+                                "admin",
+                                "manager",
+                                "rep"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "role"
                           ],
                           "additionalProperties": false
                         }
@@ -2410,6 +2485,31 @@
                             "membershipId"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "role"
+                              ]
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "owner",
+                                "admin",
+                                "manager",
+                                "rep"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "role"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
@@ -2679,6 +2779,31 @@
                       "membershipId"
                     ],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "role"
+                        ]
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "owner",
+                          "admin",
+                          "manager",
+                          "rep"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "role"
+                    ],
+                    "additionalProperties": false
                   }
                 ]
               }
@@ -2774,6 +2899,31 @@
                           "required": [
                             "kind",
                             "membershipId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "role"
+                              ]
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "owner",
+                                "admin",
+                                "manager",
+                                "rep"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "role"
                           ],
                           "additionalProperties": false
                         }
@@ -3188,6 +3338,31 @@
                           "required": [
                             "kind",
                             "membershipId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "role"
+                              ]
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "owner",
+                                "admin",
+                                "manager",
+                                "rep"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "role"
                           ],
                           "additionalProperties": false
                         }

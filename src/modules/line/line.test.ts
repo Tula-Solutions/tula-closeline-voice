@@ -13,7 +13,7 @@ type LineBody = {
   country: string
   label: string | null
   state: string
-  assignment: { kind: string; teamId?: string; membershipId?: string }
+  assignment: { kind: string; teamId?: string; membershipId?: string; role?: string }
   createdAt: string
   releasedAt: string | null
 }
@@ -277,11 +277,40 @@ describe('assigning a Line', () => {
     expect(codeOf(body)).toBe('line.assignment_invalid')
   })
 
-  it('answers line.assignment_invalid (422) for a member who is not a Rep', async () => {
+  it('answers line.assignment_invalid (422) for a Membership that is not in the Organization', async () => {
     const line = (await buy(admin)).body as LineBody
     const { status, body } = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
       kind: 'rep',
       membershipId: `mem_${crypto.randomUUID().replaceAll('-', '')}`,
+    })
+    expect(status).toBe(422)
+    expect(codeOf(body)).toBe('line.assignment_invalid')
+  })
+
+  it('assigns a Line to an Admin or Owner Membership and to a whole role', async () => {
+    const line = (await buy(admin)).body as LineBody
+    const membershipId = `mem_${crypto.randomUUID().replaceAll('-', '')}`
+    t.deps.directory.addMember(admin.organizationId, membershipId, 'owner')
+    const own = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
+      kind: 'rep',
+      membershipId,
+    })
+    expect(own.status).toBe(200)
+    const role = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
+      kind: 'role',
+      role: 'admin',
+    })
+    expect(role.status).toBe(200)
+    expect((role.body as LineBody).assignment).toEqual({ kind: 'role', role: 'admin' })
+  })
+
+  it('refuses a Membership of another Organization', async () => {
+    const line = (await buy(admin)).body as LineBody
+    const membershipId = `mem_${crypto.randomUUID().replaceAll('-', '')}`
+    t.deps.directory.addMember(newOrganizationId(), membershipId, 'admin')
+    const { status, body } = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
+      kind: 'rep',
+      membershipId,
     })
     expect(status).toBe(422)
     expect(codeOf(body)).toBe('line.assignment_invalid')
