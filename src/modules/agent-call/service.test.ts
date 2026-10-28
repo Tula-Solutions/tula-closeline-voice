@@ -426,3 +426,59 @@ describe('what the loop keeps out of logs', () => {
     expect(t.logLines.join('\n')).not.toContain('Team plan')
   })
 })
+
+describe('the Inbound Agent tools on a live Call', () => {
+  const SLOT = { startsAt: '2026-01-02T15:00:00.000Z', endsAt: '2026-01-02T15:30:00.000Z' }
+
+  test('answers a Qualification question and books an offered time, spoken to the Prospect', async () => {
+    const call = await live()
+    const inquiry = formatId('inq', crypto.randomUUID())
+    t.qualification.linkCall(org, call.id, inquiry)
+    const question = {
+      id: formatId('qst', crypto.randomUUID()),
+      position: 1,
+      prompt: 'How many seats do you need?',
+      kind: 'number' as const,
+      choices: null,
+      required: true,
+      skipWhen: [],
+    }
+    await t.questions.change(org, () => ({ next: [question], result: undefined }))
+    t.booking.setSlots(org, [SLOT])
+
+    t.llm.reply(
+      reply({
+        reply: 'Great.',
+        sources: [],
+        toolCall: { name: 'record_answer', arguments: { questionId: question.id, answer: '12' } },
+      })
+    )
+    tts.speak([AUDIO])
+    await say(call.id, { text: 'About twelve' })
+    expect(await t.qualification.answers(org, inquiry)).toEqual([
+      { questionId: question.id, value: 12, skipped: false },
+    ])
+
+    t.llm.reply(
+      reply({
+        reply: 'Let me check.',
+        sources: [],
+        toolCall: { name: 'find_slots', arguments: {} },
+      })
+    )
+    tts.speak([AUDIO])
+    await say(call.id, { text: 'Can I book a time?' })
+    t.llm.reply(
+      reply({
+        reply: 'Booking it.',
+        sources: [],
+        toolCall: { name: 'book', arguments: { slotId: SLOT.startsAt } },
+      })
+    )
+    tts.speak([AUDIO])
+    await say(call.id, { text: 'The first one' })
+    expect(t.booking.calendar(org)).toEqual([{ ...SLOT, callId: call.id }])
+    const spoken = (await turnsOf(call.id)).map((turn) => turn.text).join(' ')
+    expect(spoken).toContain("You're booked")
+  })
+})

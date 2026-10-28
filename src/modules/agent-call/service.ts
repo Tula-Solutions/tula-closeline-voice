@@ -1,6 +1,7 @@
 import type { VoiceCall } from 'tula-closeline-contract'
 import { type LlmUsage, type TtsAudioChunk, TtsError, type TtsPort } from 'tula-closeline-kit'
 import { DEFAULT_AGENT_SETTINGS } from '~/modules/agent-settings/service'
+import * as AgentTools from '~/modules/agent-tools/service'
 import * as Calls from '~/modules/call/service'
 import { AGENT_DISCLOSURE_WORDING } from '~/modules/call/service'
 import * as Conversation from '~/modules/conversation/engine'
@@ -8,7 +9,8 @@ import { InvalidTransitionError, type StoredCall } from '~/ports/call-store'
 
 /** What the speech loop needs from the container, plus the text-to-speech engine. */
 export type AgentCallDeps = Calls.CallDeps &
-  Conversation.ConversationDeps & {
+  Conversation.ConversationDeps &
+  AgentTools.AgentToolsDeps & {
     /** Turns the Agent's words into audio. */
     tts: TtsPort
   }
@@ -353,15 +355,21 @@ export async function hear(
   let characters = 0
   let interrupted = false
   let wholeReplySpoken = false
+  const turnIndex = await nextProspectIndex(deps, organizationId, callId)
+  const scope = { organizationId, callId, turnIndex }
   const result = await Conversation.converse(
     deps,
     {
       organizationId,
       conversation: { kind: 'call', id: callId },
-      turnIndex: await nextProspectIndex(deps, organizationId, callId),
+      turnIndex,
       text: input.text,
     },
     {
+      tools: {
+        context: () => AgentTools.contextFor(deps, scope),
+        act: (toolCall) => AgentTools.run(deps, scope, toolCall),
+      },
       speak: async ({ reply, usage }) => {
         const said = await speakText(
           deps,

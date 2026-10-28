@@ -3,6 +3,7 @@ import {
   ERRORS,
   MAX_SEARCH_TEXT_CHARACTERS,
   MAX_SEARCH_TURNS,
+  MAX_TURN_TEXT_LENGTH,
   type OrganizationId,
   type SearchTurn,
 } from 'tula-closeline-contract'
@@ -10,6 +11,7 @@ import { LlmError, type LlmUsage } from 'tula-closeline-kit'
 import type { Container } from '~/container'
 import { domainError } from '~/http/domain-error'
 import * as Agent from '~/modules/agent-settings/service'
+import type { ToolContext, ToolOutcome } from '~/modules/agent-tools/service'
 import type { StoredAgentTurn, TurnSource } from '~/ports/agent-turn-store'
 import { buildPrompt, type Passage } from './prompt'
 import { type ConverseInput, converseInputSchema, modelReplySchema, type ToolCall } from './schema'
@@ -64,7 +66,20 @@ export type ConverseOptions = {
    * unspoken rest, and adds `costMicroCents` to the Call in the same step. Not called on a replay.
    */
   speak?: (generated: { reply: string; usage: LlmUsage }) => Promise<SpokenReply>
+  /**
+   * The Inbound Agent's qualification and booking tools. `context` says what is pending (the next
+   * question, times just offered); `act` carries out the model's tool call before the reply is
+   * spoken and returns what to add to it, or `null` for a tool it does not handle. Tools must be
+   * idempotent: a concurrent retry of the same exchange may run one twice.
+   */
+  tools?: {
+    context: () => Promise<ToolContext>
+    act: (toolCall: ToolCall) => Promise<ToolOutcome | null>
+  }
 }
+
+/** Tools whose effect the Prospect's own words justify, so the reply needs no cited Document. */
+const SELF_SUFFICIENT_TOOLS: readonly string[] = ['record_answer', 'find_slots', 'book']
 
 /** What one exchange produced. */
 export type ConverseResult = {
@@ -184,7 +199,20 @@ export async function converse(
     sources: [],
   })
 
-  const generated = await generate(deps, organizationId, history, prospectTurn.text)
+  const context = await options.tools?.context()
+  const generated = await generate(deps, organizationId, history, prospectTurn.text, context)
+  if (generated.toolCall !== null && options.tools !== undefined) {
+    const outcome = await options.tools.act(generated.toolCall)
+    if (SELF_SUFFICIENT_TOOLS.includes(generated.toolCall.name)) {
+      // These replies are uncited, so only what the tool says is spoken, never the model's text.
+      const say = outcome?.say ?? context?.pending?.prompt ?? DEFERRAL_REPLY
+      generated.reply = [...say].slice(0, MAX_TURN_TEXT_LENGTH).join('')
+      generated.deferred = outcome === null && !context?.pending
+    } else if (outcome !== null) {
+      const whole = outcome.replace ? outcome.say : `${generated.reply} ${outcome.say}`
+      generated.reply = [...whole].slice(0, MAX_TURN_TEXT_LENGTH).join('')
+    }
+  }
   const spoken =
     options.speak === undefined
       ? undefined
@@ -224,7 +252,8 @@ async function generate(
   deps: ConversationDeps,
   organizationId: OrganizationId | string,
   history: readonly StoredAgentTurn[],
-  text: string
+  text: string,
+  context: ToolContext | undefined
 ): Promise<Generated> {
   const found = await deps.evidence.search(
     organizationId,
@@ -242,7 +271,8 @@ async function generate(
       page: match.page,
       snippet: match.snippet,
     }))
-  if (passages.length < MIN_EVIDENCE_PASSAGES) {
+  // With tools the model is asked even without evidence: the Prospect may be asking to book.
+  if (passages.length < MIN_EVIDENCE_PASSAGES && context === undefined) {
     return deferral()
   }
 
@@ -251,6 +281,7 @@ async function generate(
     text,
     passages,
     examples: found.moments.slice(0, MAX_WORDING_EXAMPLES),
+    context,
   })
   let reply: ReturnType<typeof modelReplySchema.parse>
   let usage = NO_USAGE
@@ -283,7 +314,22 @@ async function generate(
   if (reply.deferred) {
     return { reply: reply.reply, sources: [], deferred: true, toolCall: reply.toolCall, usage }
   }
+  const selfSufficient =
+    reply.toolCall !== null && SELF_SUFFICIENT_TOOLS.includes(reply.toolCall.name)
+  if (selfSufficient) {
+    return { reply: reply.reply, sources: [], deferred: false, toolCall: reply.toolCall, usage }
+  }
   const cited = sourcesOf(reply.sources, passages)
+  if (context?.pending && (cited === 'unknown' || cited.length === 0)) {
+    // Nothing to cite, but a question is waiting: ask it rather than defer.
+    return {
+      reply: context.pending.prompt,
+      sources: [],
+      deferred: false,
+      toolCall: null,
+      usage,
+    }
+  }
   if (cited === 'unknown' || cited.length === 0) {
     deps.logger.warn('agent reply rejected', {
       reason: cited === 'unknown' ? 'unknown_source' : 'no_source',
