@@ -1,9 +1,10 @@
 import { ERRORS } from 'tula-closeline-contract'
 import type { StreamingTranscribePort, TelephonyPort } from 'tula-closeline-kit'
-import { AppError } from 'tula-closeline-kit'
+import { AppError, CONTACT_UNAVAILABLE, type ContactGuard } from 'tula-closeline-kit'
 import { BookingFailedError, type BookingGateway } from '~/ports/booking-gateway'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
+import type { ProspectDirectory } from '~/ports/prospect-directory'
 
 const unavailable = (): AppError =>
   new AppError({
@@ -64,4 +65,14 @@ export function createUnconfiguredBookingGateway(): BookingGateway {
     slots: async () => Promise.reject(new BookingFailedError('booking not configured')),
     book: async () => Promise.reject(new BookingFailedError('booking not configured')),
   }
+}
+
+/** A Prospect directory for a deployment with no link to core: every lookup fails closed. */
+export function createUnconfiguredProspectDirectory(): ProspectDirectory {
+  return { lookup: async () => Promise.reject(unavailable()) }
+}
+
+/** A Contact Check for a deployment with no link to core: every check is denied, never skipped. */
+export function createUnconfiguredContactGuard(): ContactGuard {
+  return { check: async () => CONTACT_UNAVAILABLE }
 }

@@ -1134,6 +1134,673 @@
         }
       }
     },
+    "/internal/v1/agent-calls": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Ask the Agent to call a Prospect for a call Step",
+        "description": "Internal, called by outbound with the shared secret (ADR 0013). The Organization is the `X-Organization-Id` header. A known `idempotencyKey` answers 200 with the existing Agent Call. The fixed gate runs first (ADR 0030) and nothing turns it off: a refusal is a recorded Agent Call answered with 201, `result` `blocked` and the code in `gateCode`; a Line cap is a `queued` Agent Call with `gateCode` and `retryAt`, which uses no attempt. No Call is dialed yet. A Prospect with an Agent Call already queued, dialing or live is agent_call.duplicate (409, `details.agentCallId`).",
+        "security": [
+          {
+            "internalSecret": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^org_[0-9a-f]{32}$"
+            },
+            "required": true,
+            "name": "x-organization-id",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_.:-]+$"
+                  },
+                  "prospectId": {
+                    "type": "string",
+                    "pattern": "^prs_[0-9a-f]{32}$"
+                  },
+                  "lineId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^line_[0-9a-f]{32}$"
+                  },
+                  "enrollmentId": {
+                    "type": "string",
+                    "pattern": "^enr_[0-9a-f]{32}$"
+                  },
+                  "stepKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "pattern": "^[a-z][a-z0-9_-]*$"
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3
+                  },
+                  "goal": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "idempotencyKey",
+                  "prospectId",
+                  "lineId",
+                  "enrollmentId",
+                  "stepKey",
+                  "attempt",
+                  "goal"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Agent Call this key created earlier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^acl_[0-9a-f]{32}$"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "campaign_step",
+                        "rep_request"
+                      ]
+                    },
+                    "prospectId": {
+                      "type": "string",
+                      "pattern": "^prs_[0-9a-f]{32}$"
+                    },
+                    "lineId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^line_[0-9a-f]{32}$"
+                    },
+                    "enrollmentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^enr_[0-9a-f]{32}$"
+                    },
+                    "stepKey": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[a-z][a-z0-9_-]*$"
+                    },
+                    "requestedByMembershipId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^mem_[0-9a-f]{32}$"
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "dialing",
+                        "live",
+                        "ended"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "answered",
+                        "voicemail",
+                        "no_answer",
+                        "busy",
+                        "failed",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "endReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "booked",
+                        "handed_off",
+                        "not_interested",
+                        "not_now",
+                        "opted_out",
+                        "prospect_hung_up",
+                        "cap_reached",
+                        "agent_ended",
+                        null
+                      ]
+                    },
+                    "gateCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "agent.paused",
+                        "consent.missing",
+                        "consent.withdrawn",
+                        "consent.suppressed",
+                        "consent.unavailable",
+                        "agent.timezone_unknown",
+                        "agent.outside_hours",
+                        "agent_call.attempts_exhausted",
+                        "agent_call.line_cap_reached",
+                        null
+                      ]
+                    },
+                    "retryAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "callId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^call_[0-9a-f]{32}$"
+                    },
+                    "durationSeconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1800
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "source",
+                    "prospectId",
+                    "lineId",
+                    "enrollmentId",
+                    "stepKey",
+                    "requestedByMembershipId",
+                    "attempt",
+                    "state",
+                    "result",
+                    "endReason",
+                    "gateCode",
+                    "retryAt",
+                    "callId",
+                    "durationSeconds",
+                    "createdAt",
+                    "endedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new Agent Call, queued, deferred or blocked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^acl_[0-9a-f]{32}$"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "campaign_step",
+                        "rep_request"
+                      ]
+                    },
+                    "prospectId": {
+                      "type": "string",
+                      "pattern": "^prs_[0-9a-f]{32}$"
+                    },
+                    "lineId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^line_[0-9a-f]{32}$"
+                    },
+                    "enrollmentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^enr_[0-9a-f]{32}$"
+                    },
+                    "stepKey": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[a-z][a-z0-9_-]*$"
+                    },
+                    "requestedByMembershipId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^mem_[0-9a-f]{32}$"
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "dialing",
+                        "live",
+                        "ended"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "answered",
+                        "voicemail",
+                        "no_answer",
+                        "busy",
+                        "failed",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "endReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "booked",
+                        "handed_off",
+                        "not_interested",
+                        "not_now",
+                        "opted_out",
+                        "prospect_hung_up",
+                        "cap_reached",
+                        "agent_ended",
+                        null
+                      ]
+                    },
+                    "gateCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "agent.paused",
+                        "consent.missing",
+                        "consent.withdrawn",
+                        "consent.suppressed",
+                        "consent.unavailable",
+                        "agent.timezone_unknown",
+                        "agent.outside_hours",
+                        "agent_call.attempts_exhausted",
+                        "agent_call.line_cap_reached",
+                        null
+                      ]
+                    },
+                    "retryAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "callId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^call_[0-9a-f]{32}$"
+                    },
+                    "durationSeconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1800
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "source",
+                    "prospectId",
+                    "lineId",
+                    "enrollmentId",
+                    "stepKey",
+                    "requestedByMembershipId",
+                    "attempt",
+                    "state",
+                    "result",
+                    "endReason",
+                    "gateCode",
+                    "retryAt",
+                    "callId",
+                    "durationSeconds",
+                    "createdAt",
+                    "endedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "auth.unauthenticated: the shared secret is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "prospect.not_found, or line.not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "agent_call.duplicate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "server.unavailable: core could not be reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/v1/calls/{callId}/recording": {
       "get": {
         "tags": [
@@ -6727,6 +7394,688 @@
           },
           "500": {
             "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-calls": {
+      "post": {
+        "tags": [
+          "agent-calls"
+        ],
+        "summary": "Ask the Agent to call a Prospect now",
+        "description": "Owner, Admin, Manager and Rep, for a Prospect the caller can see (anything else is prospect.not_found). Needs an `Idempotency-Key`; a retry answers 200 with the first Agent Call, the same key for another Prospect is request.idempotency_key_reused (422), and a key with a colon is request.invalid. The Rep's request does not waive the Contact Check. The fixed gate runs first (ADR 0030) and nothing turns it off: a refusal is a recorded Agent Call answered with 201, `result` `blocked` and the code in `gateCode`; a Line cap is a `queued` Agent Call with `gateCode` and `retryAt`, which uses no attempt. No Call is dialed yet.",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prospectId": {
+                    "type": "string",
+                    "pattern": "^prs_[0-9a-f]{32}$"
+                  },
+                  "lineId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^line_[0-9a-f]{32}$"
+                  },
+                  "goal": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "prospectId",
+                  "lineId",
+                  "goal"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Agent Call this Idempotency-Key created earlier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^acl_[0-9a-f]{32}$"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "campaign_step",
+                        "rep_request"
+                      ]
+                    },
+                    "prospectId": {
+                      "type": "string",
+                      "pattern": "^prs_[0-9a-f]{32}$"
+                    },
+                    "lineId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^line_[0-9a-f]{32}$"
+                    },
+                    "enrollmentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^enr_[0-9a-f]{32}$"
+                    },
+                    "stepKey": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[a-z][a-z0-9_-]*$"
+                    },
+                    "requestedByMembershipId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^mem_[0-9a-f]{32}$"
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "dialing",
+                        "live",
+                        "ended"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "answered",
+                        "voicemail",
+                        "no_answer",
+                        "busy",
+                        "failed",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "endReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "booked",
+                        "handed_off",
+                        "not_interested",
+                        "not_now",
+                        "opted_out",
+                        "prospect_hung_up",
+                        "cap_reached",
+                        "agent_ended",
+                        null
+                      ]
+                    },
+                    "gateCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "agent.paused",
+                        "consent.missing",
+                        "consent.withdrawn",
+                        "consent.suppressed",
+                        "consent.unavailable",
+                        "agent.timezone_unknown",
+                        "agent.outside_hours",
+                        "agent_call.attempts_exhausted",
+                        "agent_call.line_cap_reached",
+                        null
+                      ]
+                    },
+                    "retryAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "callId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^call_[0-9a-f]{32}$"
+                    },
+                    "durationSeconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1800
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "source",
+                    "prospectId",
+                    "lineId",
+                    "enrollmentId",
+                    "stepKey",
+                    "requestedByMembershipId",
+                    "attempt",
+                    "state",
+                    "result",
+                    "endReason",
+                    "gateCode",
+                    "retryAt",
+                    "callId",
+                    "durationSeconds",
+                    "createdAt",
+                    "endedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new Agent Call, queued, deferred or blocked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^acl_[0-9a-f]{32}$"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "campaign_step",
+                        "rep_request"
+                      ]
+                    },
+                    "prospectId": {
+                      "type": "string",
+                      "pattern": "^prs_[0-9a-f]{32}$"
+                    },
+                    "lineId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^line_[0-9a-f]{32}$"
+                    },
+                    "enrollmentId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^enr_[0-9a-f]{32}$"
+                    },
+                    "stepKey": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1,
+                      "maxLength": 40,
+                      "pattern": "^[a-z][a-z0-9_-]*$"
+                    },
+                    "requestedByMembershipId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^mem_[0-9a-f]{32}$"
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "queued",
+                        "dialing",
+                        "live",
+                        "ended"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "answered",
+                        "voicemail",
+                        "no_answer",
+                        "busy",
+                        "failed",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "endReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "booked",
+                        "handed_off",
+                        "not_interested",
+                        "not_now",
+                        "opted_out",
+                        "prospect_hung_up",
+                        "cap_reached",
+                        "agent_ended",
+                        null
+                      ]
+                    },
+                    "gateCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "agent.paused",
+                        "consent.missing",
+                        "consent.withdrawn",
+                        "consent.suppressed",
+                        "consent.unavailable",
+                        "agent.timezone_unknown",
+                        "agent.outside_hours",
+                        "agent_call.attempts_exhausted",
+                        "agent_call.line_cap_reached",
+                        null
+                      ]
+                    },
+                    "retryAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "callId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^call_[0-9a-f]{32}$"
+                    },
+                    "durationSeconds": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0,
+                      "maximum": 1800
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 64,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "source",
+                    "prospectId",
+                    "lineId",
+                    "enrollmentId",
+                    "stepKey",
+                    "requestedByMembershipId",
+                    "attempt",
+                    "state",
+                    "result",
+                    "endReason",
+                    "gateCode",
+                    "retryAt",
+                    "callId",
+                    "durationSeconds",
+                    "createdAt",
+                    "endedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The access token is missing, expired or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth.forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "prospect.not_found, or line.not_found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "agent_call.duplicate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "server.unavailable: core could not be reached.",
             "content": {
               "application/json": {
                 "schema": {

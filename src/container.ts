@@ -4,7 +4,9 @@ import { createDb, type Database } from 'tula-closeline-db'
 import {
   type AnyDefinition,
   type Clock,
+  type ContactGuard,
   createAssemblyAiStreamingTranscribe,
+  createHttpContactGuard,
   createLogger,
   createRemoteKeySet,
   createTokenVerifier,
@@ -25,6 +27,7 @@ import { createBedrockLlm, DEFAULT_BEDROCK_FAST_MODEL } from 'tula-closeline-kit
 import { createSqsQueue } from 'tula-closeline-kit/queue'
 import { createS3ObjectStore } from 'tula-closeline-kit/storage'
 import {
+  createMemoryContactGuard,
   createMemoryObjectStore,
   createMemoryQueue,
   createMemoryStreamingTranscribe,
@@ -36,7 +39,9 @@ import { createMemoryBookingGateway } from '~/adapters/memory/booking-gateway'
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
+import { createMemoryProspectDirectory } from '~/adapters/memory/prospect-directory'
 import { createPlaybookHttpEvidenceSearch } from '~/adapters/playbook-http/evidence-search'
+import { createPostgresAgentCallStore } from '~/adapters/postgres/agent-call-store'
 import { createPostgresAgentSettingsStore } from '~/adapters/postgres/agent-settings-store'
 import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-store'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
@@ -53,8 +58,10 @@ import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import { createTwilioNumberProvisioner } from '~/adapters/twilio/number-provisioner'
 import {
   createUnconfiguredBookingGateway,
+  createUnconfiguredContactGuard,
   createUnconfiguredEvidenceSearch,
   createUnconfiguredOrganizationDirectory,
+  createUnconfiguredProspectDirectory,
   createUnconfiguredStreamingTranscribe,
 } from '~/adapters/unconfigured'
 import { describeError } from '~/describe-error'
@@ -68,6 +75,7 @@ import {
   jobRegistry,
 } from '~/modules/recording/messages'
 import { type CopilotRuntime, createCopilotRuntime } from '~/modules/transcript/runtime'
+import type { AgentCallStore } from '~/ports/agent-call-store'
 import type { AgentSettingsStore } from '~/ports/agent-settings-store'
 import type { AgentTurnStore } from '~/ports/agent-turn-store'
 import type { BookingGateway } from '~/ports/booking-gateway'
@@ -80,6 +88,7 @@ import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
 import { NUMBER_PROVISIONER_TIMEOUT_MS, type NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
+import type { ProspectDirectory } from '~/ports/prospect-directory'
 import type { QualificationQuestionStore } from '~/ports/qualification-question-store'
 import type { QualificationStore } from '~/ports/qualification-store'
 import type { RecordingStore } from '~/ports/recording-store'
@@ -112,6 +121,12 @@ export type Container = {
   tokenVerifier: TokenVerifier
   /** The Lines of every Organization; the only way a module reaches the `voice` schema. */
   lines: LineStore
+  /** Agent Call requests of every Organization, with the counts the gate reads. */
+  agentCalls: AgentCallStore
+  /** How to reach a Prospect and whether a viewer may see them, held by core. */
+  prospects: ProspectDirectory
+  /** The Contact Check every Agent Call passes (ADR 0003); there is no way to skip it. */
+  contactGuard: ContactGuard
   /** The Inbound Agent settings of every Organization, one row each. */
   agentSettings: AgentSettingsStore
   /** The Qualification questions of every Organization, in the order the Agent asks them. */
@@ -299,6 +314,23 @@ function createBooking(env: Env): BookingGateway {
     : createUnconfiguredBookingGateway()
 }
 
+/**
+ * Picks the Contact Check: core over HTTP when it is configured, in memory (denying everything not
+ * preset) for an unconfigured local run, and otherwise one that denies with `consent.unavailable`.
+ */
+function createContactGuard(env: Env, logger: Logger): ContactGuard {
+  if (env.CORE_INTERNAL_URL && env.CORE_INTERNAL_TOKEN) {
+    return createHttpContactGuard({
+      baseUrl: env.CORE_INTERNAL_URL,
+      secret: env.CORE_INTERNAL_TOKEN,
+      environment: env.ENVIRONMENT,
+      caller: 'voice',
+      logger,
+    })
+  }
+  return env.ENVIRONMENT === 'local' ? createMemoryContactGuard() : createUnconfiguredContactGuard()
+}
+
 /** Picks evidence search: the Playbook over HTTP when configured, in memory only for an unconfigured local run. */
 function createEvidenceSearch(env: Env): EvidenceSearch {
   if (env.PLAYBOOK_INTERNAL_URL && env.PLAYBOOK_INTERNAL_TOKEN) {
@@ -380,6 +412,13 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
       clock: systemClock,
     }),
     lines: createPostgresLineStore(database.db),
+    agentCalls: createPostgresAgentCallStore(database.db),
+    // Core has no internal route for a Prospect's number yet: only a local run gets a directory.
+    prospects:
+      env.ENVIRONMENT === 'local'
+        ? createMemoryProspectDirectory()
+        : createUnconfiguredProspectDirectory(),
+    contactGuard: createContactGuard(env, logger),
     agentSettings: createPostgresAgentSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),

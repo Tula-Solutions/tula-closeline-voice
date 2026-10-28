@@ -13,6 +13,7 @@ import {
   type TokenVerifier,
 } from 'tula-closeline-kit'
 import {
+  createMemoryContactGuard,
   createMemoryLlm,
   createMemoryObjectStore,
   createMemoryQueue,
@@ -20,6 +21,7 @@ import {
   createMemoryTelephony,
   createTestJwks,
   createTestKeyPair,
+  type MemoryContactGuard,
   type MemoryLlm,
   type MemoryObjectStore,
   type MemoryQueue,
@@ -27,6 +29,10 @@ import {
   type MemoryTelephony,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
+import {
+  createMemoryAgentCallStore,
+  type MemoryAgentCallStore,
+} from '~/adapters/memory/agent-call-store'
 import { createMemoryAgentSettingsStore } from '~/adapters/memory/agent-settings-store'
 import { createMemoryAgentTurnStore } from '~/adapters/memory/agent-turn-store'
 import {
@@ -57,6 +63,10 @@ import {
   createMemoryOrganizationDirectory,
   type MemoryOrganizationDirectory,
 } from '~/adapters/memory/organization-directory'
+import {
+  createMemoryProspectDirectory,
+  type MemoryProspectDirectory,
+} from '~/adapters/memory/prospect-directory'
 import { createMemoryQualificationQuestionStore } from '~/adapters/memory/qualification-question-store'
 import {
   createMemoryQualificationStore,
@@ -126,6 +136,9 @@ export type TestDeps = Container & {
   directory: MemoryOrganizationDirectory
   qualification: MemoryQualificationStore
   booking: MemoryBookingGateway
+  agentCalls: MemoryAgentCallStore
+  prospects: MemoryProspectDirectory
+  contactGuard: MemoryContactGuard
   callEvents: MemoryCallEventStore
   calls: MemoryCallStore
   storage: MemoryObjectStore
@@ -170,6 +183,9 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     clock,
     tokenVerifier: overrides.tokenVerifier ?? REJECTING_VERIFIER,
     lines: createMemoryLineStore(),
+    agentCalls: createMemoryAgentCallStore(),
+    prospects: createMemoryProspectDirectory(),
+    contactGuard: createMemoryContactGuard(),
     agentSettings: createMemoryAgentSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
     qualification: createMemoryQualificationStore(),
