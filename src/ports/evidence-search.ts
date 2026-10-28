@@ -10,6 +10,9 @@ export type DocumentMatch = SearchDocumentsResponse['items'][number]
 /** A won-Deal Moment the Playbook found. */
 export type MomentMatch = SearchMomentsResponse['items'][number]
 
+/** What a Moments search found: the matches and the Playbook's own count of Moments and Deals. */
+export type MomentSearch = Pick<SearchMomentsResponse, 'items' | 'evidence'>
+
 /** What a search for evidence found: Document passages (citable) and won-Deal Moments (wording only). */
 export type Evidence = { documents: DocumentMatch[]; moments: MomentMatch[] }
 
@@ -21,4 +24,14 @@ export type Evidence = { documents: DocumentMatch[]; moments: MomentMatch[] }
 export type EvidenceSearch = {
   /** The best passages and Moments for the latest turns, best first, at most `limit` of each. */
   search: (organizationId: string, turns: readonly SearchTurn[], limit: number) => Promise<Evidence>
+  /**
+   * Won-Deal Moments for the latest turns (at most `limit`), with the Playbook's evidence counts. It
+   * does not retry; `signal` ends it early. A failure throws.
+   */
+  searchMoments: (
+    organizationId: string,
+    turns: readonly SearchTurn[],
+    limit: number,
+    signal?: AbortSignal
+  ) => Promise<MomentSearch>
 }
