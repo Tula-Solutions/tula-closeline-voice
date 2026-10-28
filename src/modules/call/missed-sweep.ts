@@ -77,8 +77,9 @@ export async function sweepMissed(
  * Fails every outbound Call still `ringing` or `connecting` long after the provider could have
  * reported it (a lost status webhook, or a crash after the claim): `ringing` as `no_answer`,
  * `connecting` as `provider_error`, and ends its provider call. The bound is twice the ring time,
- * plus the Disclosure allowance and one provider call, so a Call that is really being answered is
- * never taken. Returns how many Calls it failed.
+ * plus the Disclosure allowance and one provider call. It only matches `ringing` and `connecting`,
+ * so it cannot interrupt a setup past `connecting`. shortcut: a crash after `disclosing` is not
+ * swept; add those states to the db scan when it matters. Returns how many Calls it failed.
  */
 export async function sweepStaleOutbound(
   deps: SweepDeps,
