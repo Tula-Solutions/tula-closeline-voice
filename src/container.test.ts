@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { signTwilioRequest } from 'tula-closeline-kit'
 import { DEFAULT_BEDROCK_FAST_MODEL } from 'tula-closeline-kit/llm'
-import { createContainer, reportSafely, voiceLlmModels } from './container'
+import { createContainer, LOCAL_CHAT_KEY, reportSafely, voiceLlmModels } from './container'
 import { loadEnv } from './env'
 
 test('the default reportError logs the failure with its request context at error level', () => {
@@ -196,4 +196,20 @@ test('both model tiers use the default Haiku 5.5, or LLM_MODEL when set', () => 
     fast: haiku45,
     smart: haiku45,
   })
+})
+
+test('a local run registers the publishable Chat key for the configured Organization only', async () => {
+  const lines: string[] = []
+  const organizationId = `org_${'1'.repeat(32)}`
+  const container = createContainer(
+    loadEnv({ ENVIRONMENT: 'local', LOCAL_CHAT_ORGANIZATION_ID: organizationId }),
+    { logDestination: { write: (l) => lines.push(l) } }
+  )
+  const site = await container.chatSites.ofKey(LOCAL_CHAT_KEY)
+  expect(site?.organizationId).toBe(organizationId)
+  expect(site?.allowedOrigins).toContain('http://localhost:3002')
+  expect(lines.some((l) => l.includes(LOCAL_CHAT_KEY))).toBe(true)
+
+  const bare = createContainer(loadEnv({ ENVIRONMENT: 'local' }))
+  expect(await bare.chatSites.ofKey(LOCAL_CHAT_KEY)).toBeUndefined()
 })

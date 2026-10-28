@@ -124,6 +124,16 @@ const schema = z
      * socket address is the client; at N the Nth entry from the right is (the ALB deployment sets 1).
      */
     TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(3).default(0),
+    /**
+     * The Organization whose Website Chat the local widget talks to. Used only when `local`: it
+     * registers `LOCAL_CHAT_KEY` for it; unset registers nothing.
+     */
+    LOCAL_CHAT_ORGANIZATION_ID: z
+      .string()
+      .regex(/^org_[0-9a-f]{32}$/)
+      .optional(),
+    /** The origins the local Chat key allows, comma separated; the portal's dev addresses by default. */
+    LOCAL_CHAT_ORIGINS: z.string().max(1_000).optional(),
     /** The bucket holding Call recordings. Required outside `local`. */
     STORAGE_BUCKET: z
       .string()

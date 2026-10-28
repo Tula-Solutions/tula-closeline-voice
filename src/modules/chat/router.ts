@@ -2,6 +2,7 @@ import { createRoute, type OpenAPIHono, type z } from '@hono/zod-openapi'
 import {
   publicChatConsentReceiptSchema,
   publicChatConsentRequestSchema,
+  publicChatConsentWordingSchema,
   publicChatHeadersSchema,
   publicChatKeyParamsSchema,
   publicChatMessagePageSchema,
@@ -17,6 +18,7 @@ import type { Container } from '~/container'
 import { errorResponse } from '~/http/responses'
 import { createRouter } from '~/http/router'
 import type { AppEnv } from '~/http/types'
+import { chatCors } from './cors'
 import * as Chats from './service'
 
 const PUBLIC =
@@ -142,9 +144,29 @@ const callbackConsent = createRoute({
   },
 })
 
+const consentWording = createRoute({
+  method: 'get',
+  path: '/v1/public/chat/{key}/consent-wording',
+  tags: ['chat'],
+  summary: 'Read the current callback consent wording',
+  description:
+    `${PUBLIC}Answers the id and version of the Consent Wording the callback box must show now. ` +
+    'Send both back with the callback request.',
+  request: { params: publicChatKeyParamsSchema, headers: publicChatOriginHeadersSchema },
+  responses: {
+    200: body('The current wording.', publicChatConsentWordingSchema),
+    400: errorResponse('request.invalid'),
+    403: errorResponse('chat.origin_not_allowed'),
+    404: errorResponse('chat.key_invalid'),
+    429: limited,
+    500: serverError,
+  },
+})
+
 /** The public Chat routes (spec M14): a website visitor chats with the Inbound Agent. */
 export function createChatRouter(container: Container): OpenAPIHono<AppEnv> {
   const router = createRouter<AppEnv>()
+  router.use('/v1/public/chat/*', chatCors(container))
   router.openapi(startChat, async (c) => {
     const headers = c.req.valid('header')
     const input = c.req.valid('json')
@@ -161,6 +183,19 @@ export function createChatRouter(container: Container): OpenAPIHono<AppEnv> {
     })
     return result.replayed ? c.json(result.body, 200) : c.json(result.body, 201)
   })
+  router.openapi(consentWording, async (c) =>
+    c.json(
+      await Chats.consentWording(container, {
+        key: c.req.valid('param').key,
+        origin: c.req.valid('header').origin,
+        address: {
+          socketAddress: (c.env as ClientBindings | undefined)?.requestIP?.(c.req.raw)?.address,
+          forwardedFor: c.req.header('x-forwarded-for'),
+        },
+      }),
+      200
+    )
+  )
   router.openapi(sendMessage, async (c) => {
     const headers = c.req.valid('header')
     const result = await Chats.send(container, {
