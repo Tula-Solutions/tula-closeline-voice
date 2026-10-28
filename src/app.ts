@@ -13,6 +13,7 @@ import {
 import { createAgentSettingsRouter } from '~/modules/agent-settings/router'
 import { createCallRouter } from '~/modules/call/router'
 import { createCallTurnsRouter } from '~/modules/call-turns/router'
+import { createCopilotSettingsRouter } from '~/modules/copilot-settings/router'
 import { createHandoffRouter } from '~/modules/handoff/router'
 import { createHealthRouter } from '~/modules/health/router'
 import { createLineRouter } from '~/modules/line/router'
@@ -42,6 +43,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   publicRoutes.use('*', authenticate(container))
   publicRoutes.route('/', createLineRouter(container))
   publicRoutes.route('/', createAgentSettingsRouter(container))
+  publicRoutes.route('/', createCopilotSettingsRouter(container))
   publicRoutes.route('/', createAgentCallRouter(container))
   publicRoutes.route('/', createSoftphoneRouter(container))
   publicRoutes.route('/', createCallRouter(container))

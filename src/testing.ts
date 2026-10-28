@@ -48,6 +48,7 @@ import {
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
 import { createMemoryCopilotCardStore } from '~/adapters/memory/copilot-card-store'
+import { createMemoryCopilotSettingsStore } from '~/adapters/memory/copilot-settings-store'
 import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
@@ -206,6 +207,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     prospects: createMemoryProspectDirectory(),
     contactGuard: createMemoryContactGuard(),
     agentSettings: createMemoryAgentSettingsStore(),
+    copilotSettings: createMemoryCopilotSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
     qualification: createMemoryQualificationStore(),
     booking: createMemoryBookingGateway(),

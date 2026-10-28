@@ -39,6 +39,13 @@ beforeEach(async () => {
     membershipId: membership,
   })
   telephony.script(PROSPECT, { kind: 'answers' })
+  await t.deps.copilotSettings.put(org, {
+    enabled: true,
+    minMoments: 3,
+    minDeals: 2,
+    updatedAt: null,
+    updatedBy: null,
+  })
 })
 
 async function place(body: Record<string, unknown>) {
