@@ -1,16 +1,31 @@
 import {
+  COPILOT_ERRORS,
   COPILOT_OBJECTION_TYPES,
   type CopilotCard,
+  copilotCardCursorSchema,
+  type copilotCardPageSchema,
   copilotCardSchema,
+  decodeCursor,
+  ERRORS,
+  encodeCursor,
   formatId,
+  type ListCopilotCardsQuery,
   MAX_COPILOT_CARD_TEXT_LENGTH,
   MAX_COPILOT_CARDS_PER_CALL,
   MAX_COPILOT_CITED_MOMENTS,
+  type MarkCopilotCardRequest,
+  membershipIdSchema,
+  SALES_HISTORY_ERRORS,
   type SearchTurn,
+  type VoiceCall,
 } from 'tula-closeline-contract'
 import { z } from 'zod'
 import type { Container } from '~/container'
+import { domainError } from '~/http/domain-error'
+import * as Calls from '~/modules/call/service'
+import type { Caller } from '~/modules/caller'
 import { forOrganization } from '~/modules/copilot-settings/service'
+import { eventRegistry } from '~/modules/recording/messages'
 import type { Composed } from '~/ports/copilot-card-store'
 import type { MomentMatch } from '~/ports/evidence-search'
 
@@ -258,4 +273,88 @@ export async function onProspectTurn(
   } catch (error) {
     deps.logger.warn('cards.skipped', { callId, code: (error as { code?: unknown }).code })
   }
+}
+
+/** What the cards routes need: the Calls rule, the cards, and the events queue. */
+export type CardRouteDeps = Calls.CallDeps & Pick<Container, 'events'>
+
+/**
+ * One page of the cards on a Call the caller may see, oldest first, optionally of one kind. A Call
+ * that never had the Copilot has an empty page. The cards are tenant text and are never logged.
+ */
+export async function list(
+  deps: CardRouteDeps,
+  caller: Caller,
+  callId: VoiceCall['id'],
+  query: ListCopilotCardsQuery
+): Promise<z.infer<typeof copilotCardPageSchema>> {
+  await Calls.get(deps, caller, callId)
+  const cursor =
+    query.cursor === undefined ? undefined : decodeCursor(query.cursor, copilotCardCursorSchema)
+  if (query.cursor !== undefined && cursor === undefined) {
+    throw domainError(ERRORS['request.invalid'])
+  }
+  const rows = await deps.copilotCards.list(
+    caller.organizationId,
+    callId,
+    cursor?.sequence ?? 0,
+    query.limit + 1,
+    query.kind
+  )
+  const items = rows.slice(0, query.limit)
+  const last = items.at(-1)
+  return {
+    items,
+    nextCursor:
+      rows.length > query.limit && last ? encodeCursor({ sequence: last.sequence }) : null,
+  }
+}
+
+/**
+ * Sets a card's rating, dismissal or pin to the end state asked. Only the Rep who took the Call may
+ * mark it; for anyone else the Call is `call.not_found`. A repeat changes nothing and sends the same
+ * `voice.copilot.card_rated` event id again, so a retry after a failed publish delivers it.
+ */
+export async function mark(
+  deps: CardRouteDeps,
+  caller: Caller,
+  callId: VoiceCall['id'],
+  cardId: string,
+  body: MarkCopilotCardRequest
+): Promise<CopilotCard> {
+  const call = await Calls.get(deps, caller, callId)
+  const own = await deps.directory.membershipOf(caller.organizationId, caller.userId)
+  if (own === undefined || call.repMembershipId !== own) {
+    throw domainError(SALES_HISTORY_ERRORS['call.not_found'])
+  }
+  const result = await deps.copilotCards.mark(caller.organizationId, callId, cardId, body)
+  if (result === undefined) {
+    throw domainError(COPILOT_ERRORS['card.not_found'])
+  }
+  const { card, updatedAt } = result
+  // The id comes from the card and its last change, so a retry after a failed publish (or a repeat
+  // of the same body) sends the same event and consumers dedupe on it; a later change gets a new id.
+  const hash = new Bun.CryptoHasher('sha256')
+    .update(`voice.copilot.card_rated:${card.id}:${updatedAt.toISOString()}`)
+    .digest('hex')
+  await deps.events.publish(
+    eventRegistry.create({
+      type: 'voice.copilot.card_rated',
+      id: `evt_${hash.slice(0, 32)}`,
+      traceId: callId,
+      organizationId: caller.organizationId,
+      occurredAt: updatedAt,
+      payload: {
+        callId,
+        cardId: card.id,
+        repMembershipId: membershipIdSchema.parse(own),
+        kind: card.kind,
+        rating: card.rating,
+        dismissed: card.dismissed,
+        pinned: card.pinned,
+        ratedAt: updatedAt.toISOString(),
+      },
+    })
+  )
+  return card
 }

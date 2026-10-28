@@ -15393,6 +15393,1819 @@
         }
       }
     },
+    "/v1/calls/{callId}/copilot/cards": {
+      "get": {
+        "tags": [
+          "copilot"
+        ],
+        "summary": "List the Copilot Cards shown on a Call",
+        "description": "Any voice role, for the Calls the caller may see (a Rep their own, a Manager their Team's, an Owner or Admin all). Oldest first, cursor pagination, at most 100 per page, optionally one kind. A Call that never had the Copilot has an empty page. Card text is untrusted data.",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^call_[0-9a-f]{32}$"
+            },
+            "required": true,
+            "name": "callId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\d{1,3}$"
+                }
+              ],
+              "default": 25
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "similar_moment",
+                "objection",
+                "next_step",
+                "document"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of cards.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^ccard_[0-9a-f]{32}$"
+                              },
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 60
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "moments": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  },
+                                  "deals": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  }
+                                },
+                                "required": [
+                                  "moments",
+                                  "deals"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "citedMoments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 5
+                              },
+                              "quotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    },
+                                    "prospect": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    },
+                                    "repNext": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId",
+                                    "prospect",
+                                    "repNext"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 5
+                              },
+                              "shownAt": {
+                                "type": "string",
+                                "maxLength": 64,
+                                "format": "date-time"
+                              },
+                              "rating": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "useful",
+                                  "not_useful",
+                                  null
+                                ]
+                              },
+                              "dismissed": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "type": "boolean"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "similar_moment"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "callId",
+                              "sequence",
+                              "evidence",
+                              "citedMoments",
+                              "quotes",
+                              "shownAt",
+                              "rating",
+                              "dismissed",
+                              "pinned",
+                              "kind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^ccard_[0-9a-f]{32}$"
+                              },
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 60
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "moments": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  },
+                                  "deals": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  }
+                                },
+                                "required": [
+                                  "moments",
+                                  "deals"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "citedMoments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 5
+                              },
+                              "quotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    },
+                                    "prospect": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    },
+                                    "repNext": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId",
+                                    "prospect",
+                                    "repNext"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 5
+                              },
+                              "shownAt": {
+                                "type": "string",
+                                "maxLength": 64,
+                                "format": "date-time"
+                              },
+                              "rating": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "useful",
+                                  "not_useful",
+                                  null
+                                ]
+                              },
+                              "dismissed": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "type": "boolean"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "objection"
+                                ]
+                              },
+                              "objectionType": {
+                                "type": "string",
+                                "enum": [
+                                  "price",
+                                  "timing",
+                                  "competitor",
+                                  "authority",
+                                  "need",
+                                  "trust"
+                                ]
+                              },
+                              "response": {
+                                "type": "string",
+                                "maxLength": 2400
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "callId",
+                              "sequence",
+                              "evidence",
+                              "citedMoments",
+                              "quotes",
+                              "shownAt",
+                              "rating",
+                              "dismissed",
+                              "pinned",
+                              "kind",
+                              "objectionType",
+                              "response"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^ccard_[0-9a-f]{32}$"
+                              },
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 60
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "moments": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  },
+                                  "deals": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  }
+                                },
+                                "required": [
+                                  "moments",
+                                  "deals"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "citedMoments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 5
+                              },
+                              "quotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    },
+                                    "prospect": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    },
+                                    "repNext": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId",
+                                    "prospect",
+                                    "repNext"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 5
+                              },
+                              "shownAt": {
+                                "type": "string",
+                                "maxLength": 64,
+                                "format": "date-time"
+                              },
+                              "rating": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "useful",
+                                  "not_useful",
+                                  null
+                                ]
+                              },
+                              "dismissed": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "type": "boolean"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "next_step"
+                                ]
+                              },
+                              "nextStep": {
+                                "type": "string",
+                                "maxLength": 2400
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "callId",
+                              "sequence",
+                              "evidence",
+                              "citedMoments",
+                              "quotes",
+                              "shownAt",
+                              "rating",
+                              "dismissed",
+                              "pinned",
+                              "kind",
+                              "nextStep"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "pattern": "^ccard_[0-9a-f]{32}$"
+                              },
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 60
+                              },
+                              "evidence": {
+                                "type": "object",
+                                "properties": {
+                                  "moments": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  },
+                                  "deals": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100
+                                  }
+                                },
+                                "required": [
+                                  "moments",
+                                  "deals"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "citedMoments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 5
+                              },
+                              "quotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "callId": {
+                                      "type": "string",
+                                      "pattern": "^call_[0-9a-f]{32}$"
+                                    },
+                                    "dealRecordId": {
+                                      "type": "string",
+                                      "pattern": "^deal_[0-9a-f]{32}$"
+                                    },
+                                    "prospect": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    },
+                                    "repNext": {
+                                      "type": "string",
+                                      "maxLength": 2048
+                                    }
+                                  },
+                                  "required": [
+                                    "callId",
+                                    "dealRecordId",
+                                    "prospect",
+                                    "repNext"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 5
+                              },
+                              "shownAt": {
+                                "type": "string",
+                                "maxLength": 64,
+                                "format": "date-time"
+                              },
+                              "rating": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "useful",
+                                  "not_useful",
+                                  null
+                                ]
+                              },
+                              "dismissed": {
+                                "type": "boolean"
+                              },
+                              "pinned": {
+                                "type": "boolean"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "document"
+                                ]
+                              },
+                              "source": {
+                                "type": "object",
+                                "properties": {
+                                  "documentId": {
+                                    "type": "string",
+                                    "pattern": "^doc_[0-9a-f]{32}$"
+                                  },
+                                  "page": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "minimum": 1,
+                                    "maximum": 300
+                                  },
+                                  "passage": {
+                                    "type": "string",
+                                    "maxLength": 2048
+                                  }
+                                },
+                                "required": [
+                                  "documentId",
+                                  "page",
+                                  "passage"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "callId",
+                              "sequence",
+                              "evidence",
+                              "citedMoments",
+                              "quotes",
+                              "shownAt",
+                              "rating",
+                              "dismissed",
+                              "pinned",
+                              "kind",
+                              "source"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "maxItems": 100
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The access token is missing, expired or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth.forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "call.not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "server.unavailable: the directory did not answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/calls/{callId}/copilot/cards/{cardId}": {
+      "patch": {
+        "tags": [
+          "copilot"
+        ],
+        "summary": "Rate, dismiss or pin a Copilot Card",
+        "description": "Only the Rep who took the Call; for anyone else the Call is call.not_found. The body names the end state wanted, so a repeat answers 200 with the card unchanged and sends the same voice.copilot.card_rated event id again, so consumers dedupe on it. Dismissing clears the pin and pinning clears the dismissal.",
+        "security": [
+          {
+            "accessToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^call_[0-9a-f]{32}$"
+            },
+            "required": true,
+            "name": "callId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^ccard_[0-9a-f]{32}$"
+            },
+            "required": true,
+            "name": "cardId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rating": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "useful",
+                      "not_useful",
+                      null
+                    ]
+                  },
+                  "dismissed": {
+                    "type": "boolean"
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The card as marked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^ccard_[0-9a-f]{32}$"
+                        },
+                        "callId": {
+                          "type": "string",
+                          "pattern": "^call_[0-9a-f]{32}$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 60
+                        },
+                        "evidence": {
+                          "type": "object",
+                          "properties": {
+                            "moments": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            },
+                            "deals": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            }
+                          },
+                          "required": [
+                            "moments",
+                            "deals"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "citedMoments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
+                        },
+                        "quotes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              },
+                              "prospect": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "repNext": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId",
+                              "prospect",
+                              "repNext"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 5
+                        },
+                        "shownAt": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "rating": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "useful",
+                            "not_useful",
+                            null
+                          ]
+                        },
+                        "dismissed": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "type": "boolean"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "similar_moment"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "callId",
+                        "sequence",
+                        "evidence",
+                        "citedMoments",
+                        "quotes",
+                        "shownAt",
+                        "rating",
+                        "dismissed",
+                        "pinned",
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^ccard_[0-9a-f]{32}$"
+                        },
+                        "callId": {
+                          "type": "string",
+                          "pattern": "^call_[0-9a-f]{32}$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 60
+                        },
+                        "evidence": {
+                          "type": "object",
+                          "properties": {
+                            "moments": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            },
+                            "deals": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            }
+                          },
+                          "required": [
+                            "moments",
+                            "deals"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "citedMoments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
+                        },
+                        "quotes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              },
+                              "prospect": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "repNext": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId",
+                              "prospect",
+                              "repNext"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 5
+                        },
+                        "shownAt": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "rating": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "useful",
+                            "not_useful",
+                            null
+                          ]
+                        },
+                        "dismissed": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "type": "boolean"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "objection"
+                          ]
+                        },
+                        "objectionType": {
+                          "type": "string",
+                          "enum": [
+                            "price",
+                            "timing",
+                            "competitor",
+                            "authority",
+                            "need",
+                            "trust"
+                          ]
+                        },
+                        "response": {
+                          "type": "string",
+                          "maxLength": 2400
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "callId",
+                        "sequence",
+                        "evidence",
+                        "citedMoments",
+                        "quotes",
+                        "shownAt",
+                        "rating",
+                        "dismissed",
+                        "pinned",
+                        "kind",
+                        "objectionType",
+                        "response"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^ccard_[0-9a-f]{32}$"
+                        },
+                        "callId": {
+                          "type": "string",
+                          "pattern": "^call_[0-9a-f]{32}$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 60
+                        },
+                        "evidence": {
+                          "type": "object",
+                          "properties": {
+                            "moments": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            },
+                            "deals": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            }
+                          },
+                          "required": [
+                            "moments",
+                            "deals"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "citedMoments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
+                        },
+                        "quotes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              },
+                              "prospect": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "repNext": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId",
+                              "prospect",
+                              "repNext"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 5
+                        },
+                        "shownAt": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "rating": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "useful",
+                            "not_useful",
+                            null
+                          ]
+                        },
+                        "dismissed": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "type": "boolean"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "next_step"
+                          ]
+                        },
+                        "nextStep": {
+                          "type": "string",
+                          "maxLength": 2400
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "callId",
+                        "sequence",
+                        "evidence",
+                        "citedMoments",
+                        "quotes",
+                        "shownAt",
+                        "rating",
+                        "dismissed",
+                        "pinned",
+                        "kind",
+                        "nextStep"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^ccard_[0-9a-f]{32}$"
+                        },
+                        "callId": {
+                          "type": "string",
+                          "pattern": "^call_[0-9a-f]{32}$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 60
+                        },
+                        "evidence": {
+                          "type": "object",
+                          "properties": {
+                            "moments": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            },
+                            "deals": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 100
+                            }
+                          },
+                          "required": [
+                            "moments",
+                            "deals"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "citedMoments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 5
+                        },
+                        "quotes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "callId": {
+                                "type": "string",
+                                "pattern": "^call_[0-9a-f]{32}$"
+                              },
+                              "dealRecordId": {
+                                "type": "string",
+                                "pattern": "^deal_[0-9a-f]{32}$"
+                              },
+                              "prospect": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "repNext": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "callId",
+                              "dealRecordId",
+                              "prospect",
+                              "repNext"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "maxItems": 5
+                        },
+                        "shownAt": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time"
+                        },
+                        "rating": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "useful",
+                            "not_useful",
+                            null
+                          ]
+                        },
+                        "dismissed": {
+                          "type": "boolean"
+                        },
+                        "pinned": {
+                          "type": "boolean"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "document"
+                          ]
+                        },
+                        "source": {
+                          "type": "object",
+                          "properties": {
+                            "documentId": {
+                              "type": "string",
+                              "pattern": "^doc_[0-9a-f]{32}$"
+                            },
+                            "page": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "minimum": 1,
+                              "maximum": 300
+                            },
+                            "passage": {
+                              "type": "string",
+                              "maxLength": 2048
+                            }
+                          },
+                          "required": [
+                            "documentId",
+                            "page",
+                            "passage"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "callId",
+                        "sequence",
+                        "evidence",
+                        "citedMoments",
+                        "quotes",
+                        "shownAt",
+                        "rating",
+                        "dismissed",
+                        "pinned",
+                        "kind",
+                        "source"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The access token is missing, expired or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "auth.forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "call.not_found, or card.not_found: the card is not on the Call.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "server.unavailable: the directory did not answer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/handoffs": {
       "get": {
         "tags": [

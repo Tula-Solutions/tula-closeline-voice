@@ -94,6 +94,7 @@ import { publishOnFinal } from '~/modules/recording/jobs'
 import {
   type agentCallEndedMessage,
   type callEndedMessage,
+  type cardRatedMessage,
   eventRegistry,
   type finishRecordingMessage,
   jobRegistry,
@@ -163,7 +164,9 @@ export type TestDeps = Container & {
     sinkFor: (callId: string) => (chunk: { sequence: number }) => void
     spoken: Map<string, number[]>
   }
-  events: MemoryQueue<typeof callEndedMessage | typeof agentCallEndedMessage>
+  events: MemoryQueue<
+    typeof callEndedMessage | typeof agentCallEndedMessage | typeof cardRatedMessage
+  >
   jobs: MemoryQueue<typeof finishRecordingMessage>
   /** Every JSON log line written, in order. */
   logLines: string[]

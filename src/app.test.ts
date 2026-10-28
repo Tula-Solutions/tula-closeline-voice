@@ -34,6 +34,8 @@ test('the app serves its OpenAPI document describing every route and the error b
     '/v1/calls',
     '/v1/calls/{callId}',
     '/v1/calls/{callId}/answer',
+    '/v1/calls/{callId}/copilot/cards',
+    '/v1/calls/{callId}/copilot/cards/{cardId}',
     '/v1/calls/{callId}/copilot/stream',
     '/v1/calls/{callId}/hangup',
     '/v1/calls/{callId}/recording',
