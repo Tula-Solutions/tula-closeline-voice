@@ -3,6 +3,7 @@ import type { RequestId } from 'tula-closeline-contract'
 import { createDb, type Database } from 'tula-closeline-db'
 import {
   type Clock,
+  createAssemblyAiStreamingTranscribe,
   createLogger,
   createRemoteKeySet,
   createTokenVerifier,
@@ -10,12 +11,13 @@ import {
   type LlmPort,
   type LogDestination,
   type Logger,
+  type StreamingTranscribePort,
   systemClock,
   type TelephonyPort,
   type TokenVerifier,
 } from 'tula-closeline-kit'
 import { createBedrockLlm } from 'tula-closeline-kit/llm'
-import { createMemoryTelephony } from 'tula-closeline-kit/testing'
+import { createMemoryStreamingTranscribe, createMemoryTelephony } from 'tula-closeline-kit/testing'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
@@ -25,6 +27,7 @@ import { createPostgresAgentSettingsStore } from '~/adapters/postgres/agent-sett
 import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-store'
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
+import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
 import { createPostgresQualificationQuestionStore } from '~/adapters/postgres/qualification-question-store'
@@ -34,14 +37,17 @@ import {
   createUnconfiguredEvidenceSearch,
   createUnconfiguredNumberProvisioner,
   createUnconfiguredOrganizationDirectory,
+  createUnconfiguredStreamingTranscribe,
 } from '~/adapters/unconfigured'
 import { describeError } from '~/describe-error'
 import { type Env, loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { type CopilotRuntime, createCopilotRuntime } from '~/modules/transcript/runtime'
 import type { AgentSettingsStore } from '~/ports/agent-settings-store'
 import type { AgentTurnStore } from '~/ports/agent-turn-store'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
+import type { CallTurnStore } from '~/ports/call-turn-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
 import type { LineStore } from '~/ports/line-store'
@@ -99,6 +105,12 @@ export type Container = {
   callEvents: CallEventStore
   /** Placed Calls, their state and their log; the only way a module reaches `voice.calls`. */
   calls: CallStore
+  /** The final Transcript turns of Copilot Calls, saved once each. */
+  callTurns: CallTurnStore
+  /** Speech-to-text streams: AssemblyAI, an in-memory stand-in locally, or one that fails closed. */
+  transcribe: StreamingTranscribePort
+  /** The open Copilot streams of this process and the Calls whose Transcript went quiet. */
+  copilot: CopilotRuntime
   /** Teams and Reps of an Organization, held by the core service. */
   directory: OrganizationDirectory
   /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
@@ -171,6 +183,16 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
 }
 
 /** The Bedrock model adapter, in the Region the service runs in. */
+/** AssemblyAI when keyed, an in-memory stand-in locally, otherwise one that fails closed. */
+function createTranscribe(env: Env): StreamingTranscribePort {
+  if (env.ASSEMBLYAI_API_KEY) {
+    return createAssemblyAiStreamingTranscribe({ apiKey: env.ASSEMBLYAI_API_KEY })
+  }
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryStreamingTranscribe()
+    : createUnconfiguredStreamingTranscribe()
+}
+
 function createLlm(env: Env, logger: Logger): LlmPort {
   return createBedrockLlm({ region: env.AWS_REGION, logger })
 }
@@ -254,6 +276,9 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     telephony: createTelephony(env, database.db),
     callEvents: createPostgresCallEventStore(database.db),
     calls: createPostgresCallStore(database.db),
+    callTurns: createPostgresCallTurnStore(database.db),
+    transcribe: createTranscribe(env),
+    copilot: createCopilotRuntime(),
     // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
     // Only a local run without CORE_INTERNAL_* gets the in-memory directory (empty).
     directory: createDirectory(env),

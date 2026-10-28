@@ -1,5 +1,5 @@
 import { ERRORS } from 'tula-closeline-contract'
-import type { TelephonyPort } from 'tula-closeline-kit'
+import type { StreamingTranscribePort, TelephonyPort } from 'tula-closeline-kit'
 import { AppError } from 'tula-closeline-kit'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { NumberProvisioner } from '~/ports/number-provisioner'
@@ -56,4 +56,9 @@ export function createUnconfiguredTelephony(): TelephonyPort {
 /** Evidence search for a deployment with no Playbook link for the Agent: every search fails closed. */
 export function createUnconfiguredEvidenceSearch(): EvidenceSearch {
   return { search: async () => Promise.reject(unavailable()) }
+}
+
+/** Speech-to-text for a deployment with no vendor key: opening a stream fails closed. */
+export function createUnconfiguredStreamingTranscribe(): StreamingTranscribePort {
+  return { open: async () => Promise.reject(unavailable()) }
 }

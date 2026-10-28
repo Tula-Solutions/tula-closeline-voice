@@ -173,6 +173,12 @@ const schema = z
      */
     WEBHOOK_BASE_URL: z.url().max(2_048).optional(),
     /**
+     * The AssemblyAI key for the Copilot's live Transcript. Without it a `local` run plays scripted
+     * in-memory speakers and any other environment reports the Transcript unavailable. A secret:
+     * never log it.
+     */
+    ASSEMBLYAI_API_KEY: z.string().min(1).max(256).optional(),
+    /**
      * How often, on average, each instance purges expired Twilio rows (jittered by 20% either way).
      * It runs only when `TELEPHONY_PROVIDER=twilio`, the one case that stores them in Postgres.
      */

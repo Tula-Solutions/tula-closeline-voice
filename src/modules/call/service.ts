@@ -19,9 +19,11 @@ import {
 } from 'tula-closeline-contract'
 import { TELEPHONY_ERROR_CODES, TelephonyError } from 'tula-closeline-kit'
 import type { Container } from '~/container'
+import { describeError } from '~/describe-error'
 import { domainError } from '~/http/domain-error'
 import type { Caller } from '~/modules/caller'
 import { type IdempotentAnswer, idempotent, requestHash } from '~/modules/idempotency/service'
+import * as Transcript from '~/modules/transcript/service'
 import { InvalidTransitionError, type StoredCall } from '~/ports/call-store'
 import type { StoredLine } from '~/ports/line-store'
 
@@ -29,6 +31,9 @@ import type { StoredLine } from '~/ports/line-store'
 export type CallDeps = Pick<
   Container,
   | 'calls'
+  | 'callTurns'
+  | 'transcribe'
+  | 'copilot'
   | 'lines'
   | 'telephony'
   | 'directory'
@@ -63,6 +68,17 @@ export const AGENT_DISCLOSURE_WORDING = {
   version: 2,
   aiAssisted: true,
   text: 'Hello. You are speaking with an AI assistant, and this call is being recorded for quality and training purposes. By staying on the line you agree to the recording.',
+} as const
+
+/**
+ * The Disclosure played first on a Rep's Call with the Copilot on, in force from version 3. It
+ * tells the Prospect an AI assistant is helping the Rep and that the Call is recorded. Speech
+ * goes to speech-to-text only after it has played (ADR 0003); no setting skips or replaces it.
+ */
+export const COPILOT_DISCLOSURE_WORDING = {
+  version: 3,
+  aiAssisted: true,
+  text: 'Hello. This call is being recorded, and an AI assistant is helping the sales representative on this call, for quality and training purposes. By staying on the line you agree to the recording.',
 } as const
 
 const E164 = /^\+[1-9][0-9]{6,14}$/
@@ -214,7 +230,8 @@ async function walk(
   membershipId: string,
   call: StoredCall,
   from: string,
-  to: string
+  to: string,
+  copilot: boolean
 ): Promise<StoredCall> {
   const org = caller.organizationId
   let providerCallId: string | undefined
@@ -232,7 +249,7 @@ async function walk(
     await failCall(deps, org, call, reasonOf(error), providerCallId)
     throw domainError(ERRORS['server.unavailable'])
   }
-  return finish(deps, org, membershipId, call, providerCallId)
+  return finish(deps, org, membershipId, call, providerCallId, copilot)
 }
 
 /**
@@ -245,8 +262,10 @@ async function finish(
   org: Caller['organizationId'],
   membershipId: string,
   call: StoredCall,
-  providerCallId: string
+  providerCallId: string,
+  copilot = false
 ): Promise<StoredCall> {
+  const wording = copilot ? COPILOT_DISCLOSURE_WORDING : DISCLOSURE_WORDING
   let phase: 'start' | 'disclosure' | 'after' = 'start'
   try {
     await deps.calls.transition(org, call.id, { to: 'disclosing', at: deps.clock.now() })
@@ -257,9 +276,9 @@ async function finish(
         {
           organizationId: org,
           providerCallId,
-          wordingVersion: DISCLOSURE_WORDING.version,
-          text: DISCLOSURE_WORDING.text,
-          aiAssisted: DISCLOSURE_WORDING.aiAssisted,
+          wordingVersion: wording.version,
+          text: wording.text,
+          aiAssisted: wording.aiAssisted,
         },
         options
       )
@@ -286,6 +305,12 @@ async function finish(
     )
     await deps.calls.recordRecordingStarted(org, call.id, deps.clock.now())
     const live = await deps.calls.transition(org, call.id, { to: 'live', at: deps.clock.now() })
+    if (copilot) {
+      // The Transcript never decides the Call: a failure to start it is logged and the Call goes on.
+      await Transcript.start(deps, org, call.id).catch((error: unknown) =>
+        deps.logger.warn('transcript.start_error', { callId: call.id, error: describeError(error) })
+      )
+    }
     return live ?? call
   } catch (error) {
     const reason: VoiceCallFailureReason =
@@ -368,7 +393,8 @@ export async function place(
     membershipId,
     { ...answer.body.call, providerCallSid: null, agentCostMicroCents: 0 },
     line.number,
-    to
+    to,
+    request.copilot ?? false
   )
   return { ...answer, call: toCall(final) }
 }
@@ -461,11 +487,13 @@ export async function end(
   ended: { by: NonNullable<VoiceCall['endedBy']>; at: Date }
 ): Promise<StoredCall | undefined> {
   try {
-    return await deps.calls.transition(organizationId, id, {
+    const done = await deps.calls.transition(organizationId, id, {
       to: 'ended',
       at: ended.at,
       endedBy: ended.by,
     })
+    await Transcript.stop(deps, id)
+    return done
   } catch (error) {
     if (error instanceof InvalidTransitionError) {
       return undefined
