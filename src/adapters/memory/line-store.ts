@@ -62,13 +62,21 @@ export function createMemoryLineStore(): LineStore {
         .filter((line) => query.state === undefined || line.state === query.state)
         .filter(
           (line) =>
-            query.assignedToRep === undefined ||
-            (line.assignment.kind === 'rep' && line.assignment.membershipId === query.assignedToRep)
+            query.assignedTo === undefined ||
+            JSON.stringify(line.assignment) === JSON.stringify(query.assignedTo)
         )
         .filter((line) => query.cursor === undefined || afterCursor(line, query.cursor))
-        .sort((a, b) =>
-          a.createdAt === b.createdAt ? (a.id < b.id ? 1 : -1) : a.createdAt < b.createdAt ? 1 : -1
-        )
+        .sort((a, b) => {
+          const newestFirst =
+            a.createdAt === b.createdAt
+              ? a.id < b.id
+                ? 1
+                : -1
+              : a.createdAt < b.createdAt
+                ? 1
+                : -1
+          return query.oldestFirst ? -newestFirst : newestFirst
+        })
       return lines.slice(0, query.limit).map((line) => ({ ...line }))
     },
 

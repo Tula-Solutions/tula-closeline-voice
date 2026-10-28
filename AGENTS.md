@@ -59,7 +59,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   Disclosure step has `numberTimeoutMs` plus 20 s because the provider waits for the words. A
   Disclosure failure ends the Call `failed`; no-answer, busy, failed and a hang-up while ringing
   fail it with the matching reason. A lost Copilot flag fails the Call closed. Visibility: Rep own, Manager own plus `teamRepsOf`, Owner and
-  Admin all; any other Call is `call.not_found`. `Calls.end` is service-only (no route yet).
+  Admin all; any other Call is `call.not_found`. `POST /v1/calls/{id}/hangup` (the Rep on the Call, Owner or Admin) ends the provider call and records a `live` Call `ended` by the Rep; mute and hold are the browser SDK's, the telephony port has no server-side mute or hold.
   The place-Call path is not a hot path: a Rep places a few Calls a minute and it is bound by the
   provider's latency, so it has no benchmark.
 - `src/modules/transcript/` is the Copilot live Transcript. A Rep dials with `copilot: true`; the Call

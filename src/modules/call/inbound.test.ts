@@ -281,6 +281,21 @@ describe('an inbound Call to a Team Line', () => {
   })
 })
 
+describe('an inbound Call to a role Line', () => {
+  it('rings every member holding the role and not one who holds another', async () => {
+    const a = partyIn(organizationId)
+    const b = partyIn(organizationId)
+    const manager = partyIn(organizationId, 'manager')
+    t.deps.directory.addMember(organizationId, manager.membership, 'manager')
+    const number = await lineWith(organizationId, { kind: 'role', role: 'rep' })
+    await ring(number)
+    const [call] = await callsOf()
+    expect((await answer(manager.identity, call?.id as string)).status).toBe(404)
+    expect((await answer(a.identity, call?.id as string)).status).toBe(200)
+    expect(b.membership).not.toBe(a.membership)
+  })
+})
+
 describe('Organization isolation', () => {
   it("never rings Organization A's Reps for Organization B's Team Line", async () => {
     const orgB = newOrganizationId()
@@ -305,5 +320,55 @@ describe('Organization isolation', () => {
     expect(await callsOf(orgB)).toHaveLength(0)
     expect((await answer(repB.identity, call?.id as string)).status).toBe(404)
     expect(await listed(repB.identity)).toHaveLength(0)
+  })
+})
+
+describe('hanging up from the softphone', () => {
+  const hangup = (who: TestIdentity, callId: string) =>
+    t.call(who, 'POST', `/calls/${callId}/hangup`)
+
+  it('ends the provider call and records the live Call ended by the Rep; a repeat is a no-op', async () => {
+    const rep = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    const [call] = await callsOf()
+    await answer(rep.identity, call?.id as string)
+
+    const done = await hangup(rep.identity, call?.id as string)
+    expect(done.status).toBe(200)
+    expect(done.body).toMatchObject({ state: 'ended', endedBy: 'rep' })
+    const again = await hangup(rep.identity, call?.id as string)
+    expect(again.status).toBe(200)
+    expect((again.body as CallBody).state).toBe('ended')
+  })
+
+  it('leaves a Call that is not live alone: no provider hang-up, state unchanged', async () => {
+    const rep = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    const [call] = await callsOf()
+    const before = telephony.operations.filter((entry) => entry.operation === 'hangUp').length
+
+    const res = await hangup(rep.identity, call?.id as string)
+    expect(res.status).toBe(200)
+    expect((res.body as CallBody).state).toBe('ringing')
+    expect(telephony.operations.filter((entry) => entry.operation === 'hangUp')).toHaveLength(
+      before
+    )
+  })
+
+  it('is call.not_found for another Rep and for another Organization', async () => {
+    const rep = partyIn(organizationId)
+    const other = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    const [call] = await callsOf()
+    await answer(rep.identity, call?.id as string)
+
+    expect((await hangup(other.identity, call?.id as string)).status).toBe(404)
+    expect((await hangup(partyIn(newOrganizationId()).identity, call?.id as string)).status).toBe(
+      404
+    )
+    expect((await t.deps.calls.get(organizationId, call?.id as never))?.state).toBe('live')
   })
 })

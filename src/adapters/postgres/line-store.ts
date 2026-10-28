@@ -1,5 +1,5 @@
-import { and, desc, eq, ne, sql } from 'drizzle-orm'
-import { lineSchema } from 'tula-closeline-contract'
+import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
+import { type LineAssignment, lineSchema } from 'tula-closeline-contract'
 import { type Database, lineForNumber, type Transaction, withOrganization } from 'tula-closeline-db'
 import { voiceLines } from 'tula-closeline-db/schema'
 import { transactionOf } from '~/adapters/postgres/idempotency-store'
@@ -15,8 +15,27 @@ function assignmentOf(row: Row): unknown {
       return { kind: 'team', teamId: row.assignmentTeamId }
     case 'rep':
       return { kind: 'rep', membershipId: row.assignmentMembershipId }
+    case 'role':
+      return { kind: 'role', role: row.assignmentRole }
     default:
       return { kind: 'unassigned' }
+  }
+}
+
+/** The condition for a Line whose assignment is exactly this one. */
+function assignedTo(a: LineAssignment) {
+  switch (a.kind) {
+    case 'team':
+      return and(eq(voiceLines.assignmentKind, 'team'), eq(voiceLines.assignmentTeamId, a.teamId))
+    case 'rep':
+      return and(
+        eq(voiceLines.assignmentKind, 'rep'),
+        eq(voiceLines.assignmentMembershipId, a.membershipId)
+      )
+    case 'role':
+      return and(eq(voiceLines.assignmentKind, 'role'), eq(voiceLines.assignmentRole, a.role))
+    default:
+      return eq(voiceLines.assignmentKind, 'unassigned')
   }
 }
 
@@ -98,18 +117,17 @@ export function createPostgresLineStore(db: Database): LineStore {
             and(
               eq(voiceLines.organizationId, organizationId),
               query.state === undefined ? undefined : eq(voiceLines.state, query.state),
-              query.assignedToRep === undefined
-                ? undefined
-                : and(
-                    eq(voiceLines.assignmentKind, 'rep'),
-                    eq(voiceLines.assignmentMembershipId, query.assignedToRep)
-                  ),
+              query.assignedTo === undefined ? undefined : assignedTo(query.assignedTo),
               query.cursor === undefined
                 ? undefined
                 : sql`(${voiceLines.createdAt}, ${voiceLines.id}) < (${query.cursor.createdAt}::timestamptz, ${query.cursor.id})`
             )
           )
-          .orderBy(desc(voiceLines.createdAt), desc(voiceLines.id))
+          .orderBy(
+            ...(query.oldestFirst
+              ? [asc(voiceLines.createdAt), asc(voiceLines.id)]
+              : [desc(voiceLines.createdAt), desc(voiceLines.id)])
+          )
           .limit(query.limit)
       )
       return rows.map(toStored)
@@ -145,6 +163,7 @@ export function createPostgresLineStore(db: Database): LineStore {
             assignmentKind: assignment.kind,
             assignmentTeamId: assignment.kind === 'team' ? assignment.teamId : null,
             assignmentMembershipId: assignment.kind === 'rep' ? assignment.membershipId : null,
+            assignmentRole: assignment.kind === 'role' ? assignment.role : null,
           })
           .where(and(one(organizationId, id), ne(voiceLines.state, 'released')))
           .returning()
@@ -161,6 +180,7 @@ export function createPostgresLineStore(db: Database): LineStore {
             assignmentKind: 'unassigned',
             assignmentTeamId: null,
             assignmentMembershipId: null,
+            assignmentRole: null,
             releasedAt: at,
           })
           .where(and(one(organizationId, id), ne(voiceLines.state, 'released')))

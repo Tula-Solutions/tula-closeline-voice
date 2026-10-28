@@ -3,6 +3,7 @@ import {
   ERRORS,
   encodeCursor,
   formatId,
+  type LineAssignment,
   type ListVoiceCallsQuery,
   type PlaceCallRequest,
   type PlacedCall,
@@ -206,15 +207,32 @@ async function lineFor(
     }
     return line
   }
-  const [own] = await deps.lines.list(caller.organizationId, {
-    limit: 1,
-    state: 'active',
-    assignedToRep: membershipId,
-  })
-  if (own === undefined) {
-    throw domainError(VOICE_ERRORS['call.line_unavailable'])
+  // The caller's own Line first, then a Team's, then their role's; the oldest Line in each. Teams
+  // are looked up only when the own Line is missing, so a directory outage cannot block it.
+  const firstOf = async (assignedTo: LineAssignment) =>
+    (
+      await deps.lines.list(caller.organizationId, {
+        limit: 1,
+        state: 'active',
+        assignedTo,
+        oldestFirst: true,
+      })
+    )[0]
+  const own = await firstOf({ kind: 'rep', membershipId } as LineAssignment)
+  if (own !== undefined) {
+    return own
   }
-  return own
+  for (const teamId of await deps.directory.teamsOf(caller.organizationId, membershipId)) {
+    const found = await firstOf({ kind: 'team', teamId } as LineAssignment)
+    if (found !== undefined) {
+      return found
+    }
+  }
+  const byRole = await firstOf({ kind: 'role', role: caller.role })
+  if (byRole !== undefined) {
+    return byRole
+  }
+  throw domainError(VOICE_ERRORS['call.line_unavailable'])
 }
 
 /** Fails the Call, hangs the provider call up when there is one, and logs; never throws. */
@@ -652,6 +670,12 @@ export async function ringSet(
   if (line.assignment.kind === 'rep') {
     return [line.assignment.membershipId]
   }
+  if (line.assignment.kind === 'role') {
+    return (await deps.directory.roleMembers(organizationId, line.assignment.role)).slice(
+      0,
+      MAX_RINGING_REPS
+    )
+  }
   if (line.assignment.kind === 'team') {
     return (await deps.directory.onlineRepsOfTeam(organizationId, line.assignment.teamId)).slice(
       0,
@@ -768,4 +792,43 @@ export async function answer(
     claimed.providerCallSid
   )
   return toCall(final)
+}
+
+/**
+ * The Rep hangs up from the softphone: the provider call is ended, then a `live` Call is recorded
+ * `ended` by the Rep. Only the Rep on the Call (or an Owner or Admin) may; any other Call is
+ * `call.not_found`. A Call that is not live (over, or still ringing) is returned as it is, so a repeat is safe;
+ * a Call not yet live is left for the provider's callback to settle (no-answer, caller hang-up).
+ */
+export async function hangUp(
+  deps: CallDeps,
+  caller: Caller,
+  id: VoiceCall['id']
+): Promise<VoiceCall> {
+  requireVoiceRole(caller)
+  const stored = await deps.calls.get(caller.organizationId, id)
+  const own = await deps.directory.membershipOf(caller.organizationId, caller.userId)
+  if (
+    stored === undefined ||
+    (!isAdmin(caller) && (own === undefined || own !== stored.repMembershipId))
+  ) {
+    throw domainError(SALES_HISTORY_ERRORS['call.not_found'])
+  }
+  if (stored.state !== 'live' || stored.providerCallSid === null) {
+    return toCall(stored)
+  }
+  const providerCallId = stored.providerCallSid
+  try {
+    await withinDeadline(deps, (options) =>
+      deps.telephony.hangUp(
+        { organizationId: caller.organizationId, providerCallId, by: 'rep' },
+        options
+      )
+    )
+  } catch (error) {
+    deps.logger.warn('call.hangup.failed', { callId: id, error: describeError(error) })
+    throw domainError(ERRORS['server.unavailable'])
+  }
+  const ended = await end(deps, caller.organizationId, id, { by: 'rep', at: deps.clock.now() })
+  return toCall(ended ?? (await deps.calls.get(caller.organizationId, id)) ?? stored)
 }
