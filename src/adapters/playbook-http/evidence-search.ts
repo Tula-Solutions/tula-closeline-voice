@@ -2,6 +2,8 @@ import {
   ERRORS,
   searchDocumentsRequestSchema,
   searchDocumentsResponseSchema,
+  searchMomentsRequestSchema,
+  searchMomentsResponseSchema,
 } from 'tula-closeline-contract'
 import { AppError } from 'tula-closeline-kit'
 import type { EvidenceSearch } from '~/ports/evidence-search'
@@ -10,6 +12,8 @@ import type { EvidenceSearch } from '~/ports/evidence-search'
 export const PLAYBOOK_SEARCH_TIMEOUT_MS = 2_500
 /** Retries after a timeout or a 503, on top of the first attempt (worst case about 5.3 s in all). */
 export const PLAYBOOK_SEARCH_RETRIES = 1
+/** The longest the Copilot's Moments search may take, in ms; it is never retried. */
+export const PLAYBOOK_MOMENTS_TIMEOUT_MS = 1_200
 /** The base of the exponential backoff between attempts, in milliseconds. */
 const BACKOFF_BASE_MS = 100
 /** The longest wait a `Retry-After` may ask for, in milliseconds. */
@@ -23,6 +27,8 @@ export type PlaybookHttpOptions = {
   token: string
   /** Per-attempt timeout; defaults to {@link PLAYBOOK_SEARCH_TIMEOUT_MS}. */
   timeoutMs?: number
+  /** The Moments search timeout; defaults to {@link PLAYBOOK_MOMENTS_TIMEOUT_MS}. */
+  momentsTimeoutMs?: number
   /** Retries after a failed attempt; defaults to {@link PLAYBOOK_SEARCH_RETRIES}. */
   retries?: number
   /** The HTTP client; defaults to the global `fetch`. */
@@ -98,7 +104,45 @@ export function createPlaybookHttpEvidenceSearch(options: PlaybookHttpOptions): 
     }
   }
 
+  const momentsUrl = `${options.baseUrl.replace(/\/+$/, '')}/internal/v1/playbook/search/moments`
+  const momentsTimeoutMs = options.momentsTimeoutMs ?? PLAYBOOK_MOMENTS_TIMEOUT_MS
+
   return {
+    async searchMoments(organizationId, turns, limit, signal) {
+      const request = searchMomentsRequestSchema.safeParse({ turns, limit })
+      if (!request.success) {
+        throw fail('server.unavailable')
+      }
+      const timeout = AbortSignal.timeout(momentsTimeoutMs)
+      try {
+        const response = await doFetch(momentsUrl, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${options.token}`,
+            'x-organization-id': organizationId,
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify(request.data),
+          redirect: 'error',
+          signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+        })
+        const data = response.status === 200 ? await response.json() : undefined
+        if (response.status !== 200) {
+          await response.body?.cancel().catch(() => {})
+        }
+        const parsed = searchMomentsResponseSchema.safeParse(data)
+        if (!parsed.success) {
+          throw fail('server.unavailable')
+        }
+        return { items: parsed.data.items, evidence: parsed.data.evidence }
+      } catch (error) {
+        if (error instanceof AppError) {
+          throw error
+        }
+        throw fail(timeout.aborted ? 'server.timeout' : 'server.unavailable')
+      }
+    },
     async search(organizationId, turns, limit) {
       const request = searchDocumentsRequestSchema.safeParse({ turns, limit })
       if (!request.success) {
@@ -125,8 +169,6 @@ export function createPlaybookHttpEvidenceSearch(options: PlaybookHttpOptions): 
         if (result.status !== 200 || !parsed.success) {
           throw fail('server.unavailable')
         }
-        // shortcut: the Playbook has no internal Moments route yet, so none are returned; add the
-        // call here when POST /internal/v1/playbook/search/moments exists.
         return { documents: parsed.data.items, moments: [] }
       }
       throw last

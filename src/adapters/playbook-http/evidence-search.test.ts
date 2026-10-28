@@ -123,3 +123,44 @@ test('it does not wait for Retry-After after the last attempt', async () => {
   // one backoff before the retry, one Retry-After wait after the first attempt; none after the last
   expect(sleeps).toHaveLength(2)
 })
+
+const MOMENT_BODY = {
+  items: [
+    {
+      callId: `call_${'c'.repeat(32)}`,
+      dealRecordId: `deal_${'d'.repeat(32)}`,
+      score: 0.9,
+      prospect: 'Too expensive.',
+      repNext: 'Fair, here is why.',
+    },
+  ],
+  suggestions: [],
+  evidence: { moments: 3, deals: 2 },
+}
+
+test('searchMoments posts to the Moments route and returns items with the Playbook evidence', async () => {
+  const { search, seen } = fake([() => Response.json(MOMENT_BODY)])
+  const found = await search.searchMoments(ORG, TURNS, 5)
+  expect(found.evidence).toEqual({ moments: 3, deals: 2 })
+  expect(found.items).toHaveLength(1)
+  expect(seen[0]?.headers.get('x-organization-id')).toBe(ORG)
+  expect(seen[0]?.headers.get('authorization')).toBe(`Bearer ${SECRET}`)
+})
+
+test('searchMoments is never retried: a 503, a bad body and a 404 each fail once', async () => {
+  for (const handler of [status(503), () => Response.json({ nope: 1 }), status(404)]) {
+    const { search, seen } = fake([handler])
+    await expect(search.searchMoments(ORG, TURNS, 5)).rejects.toMatchObject({
+      code: 'server.unavailable',
+    })
+    expect(seen).toHaveLength(1)
+    server?.stop(true)
+  }
+})
+
+test('searchMoments gives up at its own timeout as server.timeout', async () => {
+  const { search } = fake([() => new Promise<Response>(() => {})])
+  await expect(search.searchMoments(ORG, TURNS, 5)).rejects.toMatchObject({
+    code: 'server.timeout',
+  })
+})

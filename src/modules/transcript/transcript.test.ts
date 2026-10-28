@@ -292,6 +292,43 @@ describe('GET /v1/calls/{callId}/copilot/stream', () => {
     expect(turns[0]).not.toContain('"text":"one"')
   })
 
+  it('sends a retrieval card after the Prospect turn it answers, and resumes after it', async () => {
+    const found = Array.from({ length: 3 }, (_, i) => ({
+      callId: formatId('call', crypto.randomUUID()),
+      dealRecordId: formatId('deal', crypto.randomUUID()),
+      score: 0.9 - i / 100,
+      prospect: `Too expensive ${i}`,
+      repNext: `Here is why ${i}`,
+    }))
+    t.deps.evidence.load(org, { moments: found as never })
+    const id = await placeScripted({ prospect: [{ text: 'that costs too much', afterBytes: 100 }] })
+    speak(id, 'prospect')
+    await Transcript.settled(t.deps, id)
+    const seen = await frames(await open(rep, id), (s) => s.some((f) => f.includes('copilot.card')))
+    const card = seen.find((f) => f.includes('copilot.card')) ?? ''
+    expect(card).toContain('"evidence":{"moments":3,"deals":3}')
+    expect(card).toContain(found[0]?.callId as string)
+    expect(card).toContain('id: r0.p1.c1')
+    t.deps.copilot.maxStreamMs = 60
+    const again = await frames(await open(rep, id, 'r0.p1.c1'), () => false)
+    expect(again.some((f) => f.includes('copilot.card'))).toBe(false)
+  })
+
+  it('keeps the Call and its Transcript when the card search fails', async () => {
+    Object.assign(t.deps, {
+      evidence: {
+        ...t.deps.evidence,
+        searchMoments: async () => Promise.reject(new Error('down')),
+      },
+    })
+    const id = await placeScripted({ prospect: [{ text: 'that costs too much', afterBytes: 100 }] })
+    speak(id, 'prospect')
+    await Transcript.settled(t.deps, id)
+    expect(await heard(id)).toEqual(['prospect:that costs too much'])
+    expect(await t.deps.copilotCards.list(org, id as never, 0, 10)).toEqual([])
+    expect(await unavailable(id)).toBeNull()
+  })
+
   it('announces transcript.unavailable when speech-to-text failed', async () => {
     t.deps.transcribe.failNextOpen('streaming_transcribe.rejected', 2)
     const { call } = await place({ to: PROSPECT, copilot: true })

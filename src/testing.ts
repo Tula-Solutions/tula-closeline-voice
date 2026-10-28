@@ -39,6 +39,7 @@ import {
 } from '~/adapters/memory/call-event-store'
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
+import { createMemoryCopilotCardStore } from '~/adapters/memory/copilot-card-store'
 import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
@@ -193,6 +194,7 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     events: createMemoryQueue({ registry: eventRegistry, clock }),
     jobs,
     callTurns: createMemoryCallTurnStore(),
+    copilotCards: createMemoryCopilotCardStore(),
     transcribe: createMemoryStreamingTranscribe({ sleep: async () => undefined, random: () => 0 }),
     copilot: createCopilotRuntime(5),
     directory: createMemoryOrganizationDirectory(),

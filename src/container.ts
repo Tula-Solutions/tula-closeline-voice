@@ -42,6 +42,7 @@ import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-sto
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
+import { createPostgresCopilotCardStore } from '~/adapters/postgres/copilot-card-store'
 import { createPostgresHandoffStore } from '~/adapters/postgres/handoff-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
@@ -74,6 +75,7 @@ import type { BookingGateway } from '~/ports/booking-gateway'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { CallTurnStore } from '~/ports/call-turn-store'
+import type { CopilotCardStore } from '~/ports/copilot-card-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { HandoffStore } from '~/ports/handoff-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
@@ -152,6 +154,8 @@ export type Container = {
   jobs: Queue<JobEnvelope>
   /** The final Transcript turns of Copilot Calls, saved once each. */
   callTurns: CallTurnStore
+  /** The retrieval cards shown to Reps during Copilot Calls. */
+  copilotCards: CopilotCardStore
   /** Speech-to-text streams: AssemblyAI, an in-memory stand-in locally, or one that fails closed. */
   transcribe: StreamingTranscribePort
   /** The open Copilot streams of this process and the Calls whose Transcript went quiet. */
@@ -405,6 +409,7 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     events: createQueue(env, env.QUEUE_URL, eventRegistry),
     jobs,
     callTurns: createPostgresCallTurnStore(database.db),
+    copilotCards: createPostgresCopilotCardStore(database.db),
     transcribe: createTranscribe(env),
     copilot: createCopilotRuntime(),
     // Teams and Reps live in core's schema, which this service never reads: ask core over HTTP.
