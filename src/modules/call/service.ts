@@ -768,3 +768,42 @@ export async function answer(
   )
   return toCall(final)
 }
+
+/**
+ * The Rep hangs up from the softphone: the provider call is ended, then a `live` Call is recorded
+ * `ended` by the Rep. Only the Rep on the Call (or an Owner or Admin) may; any other Call is
+ * `call.not_found`. A Call that is already over is returned as it is, so a repeat is safe. A Call
+ * not yet live is left for the provider's callback to settle (no-answer, hang-up while ringing).
+ */
+export async function hangUp(
+  deps: CallDeps,
+  caller: Caller,
+  id: VoiceCall['id']
+): Promise<VoiceCall> {
+  requireVoiceRole(caller)
+  const stored = await deps.calls.get(caller.organizationId, id)
+  const own = await deps.directory.membershipOf(caller.organizationId, caller.userId)
+  if (
+    stored === undefined ||
+    (!isAdmin(caller) && (own === undefined || own !== stored.repMembershipId))
+  ) {
+    throw domainError(SALES_HISTORY_ERRORS['call.not_found'])
+  }
+  if (['ended', 'failed', 'missed'].includes(stored.state) || stored.providerCallSid === null) {
+    return toCall(stored)
+  }
+  const providerCallId = stored.providerCallSid
+  try {
+    await withinDeadline(deps, (options) =>
+      deps.telephony.hangUp(
+        { organizationId: caller.organizationId, providerCallId, by: 'rep' },
+        options
+      )
+    )
+  } catch (error) {
+    deps.logger.warn('call.hangup.failed', { callId: id, error: describeError(error) })
+    throw domainError(ERRORS['server.unavailable'])
+  }
+  const ended = await end(deps, caller.organizationId, id, { by: 'rep', at: deps.clock.now() })
+  return toCall(ended ?? (await deps.calls.get(caller.organizationId, id)) ?? stored)
+}

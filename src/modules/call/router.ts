@@ -156,6 +156,27 @@ const answerInbound = createRoute({
   },
 })
 
+const hangUp = createRoute({
+  method: 'post',
+  path: '/calls/{callId}/hangup',
+  tags: ['calls'],
+  summary: 'Hang up a Call',
+  description:
+    'The Rep on the Call (or an Owner or Admin) ends it at the provider; a `live` Call becomes ' +
+    '`ended`, by the Rep. A Call that is already over is returned as it is.',
+  security,
+  request: { params: voiceCallParamsSchema },
+  responses: {
+    200: callBody('The Call.'),
+    400: errorResponse('request.invalid'),
+    401: unauthorized,
+    403: errorResponse('auth.forbidden'),
+    404: errorResponse('call.not_found'),
+    500: serverError,
+    503: errorResponse('server.unavailable: the telephony provider did not answer.'),
+  },
+})
+
 /** The Calls of the caller's Organization. Mounted behind the access-token middleware. */
 export function createCallRouter(container: Container): OpenAPIHono<AuthedEnv> {
   const router = createRouter<AuthedEnv>()
@@ -185,6 +206,9 @@ export function createCallRouter(container: Container): OpenAPIHono<AuthedEnv> {
   )
   router.openapi(answerInbound, async (c) =>
     c.json(await Calls.answer(container, callerOf(c), c.req.valid('param').callId), 200)
+  )
+  router.openapi(hangUp, async (c) =>
+    c.json(await Calls.hangUp(container, callerOf(c), c.req.valid('param').callId), 200)
   )
 
   return router

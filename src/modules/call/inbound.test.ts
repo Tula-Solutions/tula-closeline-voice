@@ -307,3 +307,38 @@ describe('Organization isolation', () => {
     expect(await listed(repB.identity)).toHaveLength(0)
   })
 })
+
+describe('hanging up from the softphone', () => {
+  const hangup = (who: TestIdentity, callId: string) =>
+    t.call(who, 'POST', `/calls/${callId}/hangup`)
+
+  it('ends the provider call and records the live Call ended by the Rep; a repeat is a no-op', async () => {
+    const rep = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    const [call] = await callsOf()
+    await answer(rep.identity, call?.id as string)
+
+    const done = await hangup(rep.identity, call?.id as string)
+    expect(done.status).toBe(200)
+    expect(done.body).toMatchObject({ state: 'ended', endedBy: 'rep' })
+    const again = await hangup(rep.identity, call?.id as string)
+    expect(again.status).toBe(200)
+    expect((again.body as CallBody).state).toBe('ended')
+  })
+
+  it('is call.not_found for another Rep and for another Organization', async () => {
+    const rep = partyIn(organizationId)
+    const other = partyIn(organizationId)
+    const number = await lineWith(organizationId, { kind: 'rep', membershipId: rep.membership })
+    await ring(number)
+    const [call] = await callsOf()
+    await answer(rep.identity, call?.id as string)
+
+    expect((await hangup(other.identity, call?.id as string)).status).toBe(404)
+    expect((await hangup(partyIn(newOrganizationId()).identity, call?.id as string)).status).toBe(
+      404
+    )
+    expect((await t.deps.calls.get(organizationId, call?.id as never))?.state).toBe('live')
+  })
+})
