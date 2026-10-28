@@ -47,6 +47,14 @@ import {
 } from '~/adapters/memory/call-event-store'
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
+import { createMemoryChatRateLimiter } from '~/adapters/memory/chat-limits'
+import {
+  createMemoryChatSites,
+  createMemoryConsentRecorder,
+  type MemoryChatSites,
+  type MemoryConsentRecorder,
+} from '~/adapters/memory/chat-sites'
+import { createMemoryChatStore } from '~/adapters/memory/chat-store'
 import { createMemoryCopilotCardStore } from '~/adapters/memory/copilot-card-store'
 import { createMemoryCopilotSettingsStore } from '~/adapters/memory/copilot-settings-store'
 import {
@@ -137,6 +145,8 @@ export type TestDeps = Container & {
   transcribe: MemoryStreamingTranscribe
   evidence: MemoryEvidenceSearch
   idempotency: MemoryIdempotencyStore
+  chatSites: MemoryChatSites
+  consents: MemoryConsentRecorder
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
   qualification: MemoryQualificationStore
@@ -220,6 +230,10 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     evidence: createMemoryEvidenceSearch(),
     llm: createMemoryLlm({ sleep: async () => undefined, random: () => 0 }),
     idempotency: createMemoryIdempotencyStore(),
+    chats: createMemoryChatStore(),
+    chatLimits: createMemoryChatRateLimiter(),
+    chatSites: createMemoryChatSites(),
+    consents: createMemoryConsentRecorder(),
     numbers: createMemoryNumberProvisioner(),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: overrides.telephony ?? createMemoryTelephony(),

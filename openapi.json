@@ -1092,6 +1092,1482 @@
         }
       }
     },
+    "/v1/public/chat/{key}/sessions": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Start a website Chat",
+        "description": "Public: it carries no access token. The publishable key or the session token in the path stands in for it, and the `Origin` must be one the Organization allows. Starts a Chat and returns the session token and the first message, which says the visitor is talking to an AI. The same `Idempotency-Key` returns the same session (200). A filled `website` field is answered like a start, but nothing is stored.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{32,64}$"
+            },
+            "required": true,
+            "name": "key",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "pattern": "^(https:\\/\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?|http:\\/\\/(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?)$"
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sourceUrl": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^https?:\\/\\/[^\\s]+$"
+                  },
+                  "website": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "sourceUrl"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session this Idempotency-Key started earlier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionToken": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{32,64}$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "agent"
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "at": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "role",
+                          "text",
+                          "at"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 5
+                    }
+                  },
+                  "required": [
+                    "sessionToken",
+                    "expiresAt",
+                    "messages"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionToken": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{32,64}$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "agent"
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "at": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "role",
+                          "text",
+                          "at"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 5
+                    }
+                  },
+                  "required": [
+                    "sessionToken",
+                    "expiresAt",
+                    "messages"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "chat.origin_not_allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat.key_invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "request.idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate.limited: too many requests; see Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/chat/sessions/{sessionToken}/messages": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Send a Chat message and get the reply",
+        "description": "Public: it carries no access token. The publishable key or the session token in the path stands in for it, and the `Origin` must be one the Organization allows. The visitor's text is untrusted data for the Agent, never an instruction. The same `Idempotency-Key` with the same text answers the first reply and asks the model nothing.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{32,64}$"
+            },
+            "required": true,
+            "name": "sessionToken",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "pattern": "^(https:\\/\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?|http:\\/\\/(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?)$"
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Agent's reply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reply": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "deferred": {
+                          "type": "boolean"
+                        },
+                        "handoffOffered": {
+                          "type": "boolean"
+                        },
+                        "at": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "deferred",
+                        "handoffOffered",
+                        "at"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "reply"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "chat.origin_not_allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat.session_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request.idempotency_in_progress (409), or chat.session_closed: the Chat has ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "request.idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate.limited: too many requests; see Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "List the messages of a Chat",
+        "description": "Public: it carries no access token. The publishable key or the session token in the path stands in for it, and the `Origin` must be one the Organization allows. Oldest first, cursor pagination, at most 100 per page. Message 0 is the AI disclosure.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{32,64}$"
+            },
+            "required": true,
+            "name": "sessionToken",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\d{1,3}$"
+                }
+              ],
+              "default": 25
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "pattern": "^(https:\\/\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?|http:\\/\\/(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?)$"
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of messages.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": [
+                              "prospect",
+                              "agent"
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "at": {
+                            "type": "string",
+                            "maxLength": 64,
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "role",
+                          "text",
+                          "at"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "maxItems": 100
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid: the query or the cursor is not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "chat.origin_not_allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat.session_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "chat.session_closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/chat/sessions/{sessionToken}/callback-consent": {
+      "post": {
+        "tags": [
+          "chat"
+        ],
+        "summary": "Leave a name and phone, with or without agreeing to a callback",
+        "description": "Public: it carries no access token. The publishable key or the session token in the path stands in for it, and the `Origin` must be one the Organization allows. Records the Consent Wording id and version the visitor saw. A wording that is not the current one is chat.consent_wording_missing and nothing is recorded. The Chat becomes an Inquiry; without the callback box ticked the details are kept and no call is placed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{32,64}$"
+            },
+            "required": true,
+            "name": "sessionToken",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "pattern": "^(https:\\/\\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?|http:\\/\\/(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?)$"
+            },
+            "required": true,
+            "name": "origin",
+            "in": "header"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "phone": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "consentWordingId": {
+                    "type": "string",
+                    "pattern": "^cwd_[0-9a-f]{32}$"
+                  },
+                  "consentWordingVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "callbackConsent": {
+                    "type": "boolean"
+                  },
+                  "sourceUrl": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^https?:\\/\\/[^\\s]+$"
+                  }
+                },
+                "required": [
+                  "name",
+                  "phone",
+                  "consentWordingId",
+                  "consentWordingVersion",
+                  "callbackConsent",
+                  "sourceUrl"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The consent this Idempotency-Key recorded earlier.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "receivedAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "received",
+                    "receivedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The consent was recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "receivedAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "received",
+                    "receivedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "request.invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "chat.origin_not_allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "chat.session_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request.idempotency_in_progress (409), or chat.session_closed: the Chat has ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "chat.consent_wording_missing, or request.idempotency_key_reused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on our side.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "maxLength": 100,
+                          "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+                        },
+                        "message": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/internal/v1/calls/{callId}/turns": {
       "get": {
         "tags": [

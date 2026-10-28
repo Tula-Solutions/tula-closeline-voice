@@ -9,7 +9,9 @@ import {
 } from '~/modules/media/handler'
 
 /** The part of the app that the server needs. */
-type Fetcher = { fetch: (request: Request) => Response | Promise<Response> }
+type Fetcher = {
+  fetch: (request: Request, server?: object) => Response | Promise<Response>
+}
 
 /** What rides on each media socket: the Call it was signed for and its session once open. */
 export type MediaSocketData = { context: MediaContext; session?: MediaSession }
@@ -43,11 +45,14 @@ export function serveOptions(container: Container, app: Fetcher) {
     port: container.env.PORT,
     fetch: async (
       request: Request,
-      server: { upgrade: (request: Request, options: { data: MediaSocketData }) => boolean }
+      server: {
+        upgrade: (request: Request, options: { data: MediaSocketData }) => boolean
+        requestIP: (request: Request) => { address: string } | null
+      }
     ): Promise<Response | undefined> => {
       const media = await authorizeMedia(container, request)
       if (media === undefined) {
-        return app.fetch(request)
+        return app.fetch(request, server)
       }
       if (media instanceof Response) {
         return media

@@ -13,6 +13,7 @@ import {
 import { createAgentSettingsRouter } from '~/modules/agent-settings/router'
 import { createCallRouter } from '~/modules/call/router'
 import { createCallTurnsRouter } from '~/modules/call-turns/router'
+import { createChatRouter } from '~/modules/chat/router'
 import { createCopilotSettingsRouter } from '~/modules/copilot-settings/router'
 import { createHandoffRouter } from '~/modules/handoff/router'
 import { createHealthRouter } from '~/modules/health/router'
@@ -31,6 +32,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   app.route('/', createHealthRouter(container))
   // The provider calls these without an access token; each request proves itself by signature.
   app.route('/', createWebhookRouter(container))
+  app.route('/', createChatRouter(container))
 
   // Trusted services call these with the shared secret (ADR 0013), not an access token.
   app.route('/', createCallTurnsRouter(container))
