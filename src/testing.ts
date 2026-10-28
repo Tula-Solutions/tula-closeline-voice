@@ -6,6 +6,8 @@ import {
   createStaticKeySet,
   createTokenVerifier,
   type FixedClock,
+  TELEPHONY_ERROR_CODES,
+  TelephonyError,
   type TelephonyPort,
   TokenVerificationError,
   type TokenVerifier,
@@ -22,6 +24,7 @@ import {
   type MemoryObjectStore,
   type MemoryQueue,
   type MemoryStreamingTranscribe,
+  type MemoryTelephony,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
 import { createMemoryAgentSettingsStore } from '~/adapters/memory/agent-settings-store'
@@ -64,6 +67,7 @@ import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
 import { loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { idle } from '~/modules/call/service'
 import { publishOnFinal } from '~/modules/recording/jobs'
 import {
   type callEndedMessage,
@@ -283,4 +287,66 @@ export const newOrganizationId = (): OrganizationId => formatId('org', crypto.ra
 /** An identity with the role in a fresh or given Organization. */
 export function identityOf(role: Role, organizationId = newOrganizationId()): TestIdentity {
   return { userId: newUserId(), organizationId, role }
+}
+
+/**
+ * Wraps a memory telephony so a dialled call behaves like real Twilio: it rings, and the
+ * Disclosure, the bridge and the Recording are refused (`callEnded`) until `answer` is called.
+ */
+export function ringUntilAnswered(inner: MemoryTelephony): MemoryTelephony & {
+  /** Marks the provider call answered, as the Prospect picking up does. */
+  answer: (providerCallId: string) => void
+} {
+  const answered = new Set<string>()
+  const gated =
+    (name: 'playDisclosure' | 'bridge' | 'startRecording') =>
+    (request: { providerCallId: string }, ...rest: unknown[]) => {
+      if (!answered.has(request.providerCallId)) {
+        throw new TelephonyError(TELEPHONY_ERROR_CODES.callEnded, 'the call is not answered')
+      }
+      return (inner[name] as (...args: unknown[]) => unknown)(request, ...rest)
+    }
+  const overrides: Record<string | symbol, unknown> = {
+    playDisclosure: gated('playDisclosure'),
+    bridge: gated('bridge'),
+    startRecording: gated('startRecording'),
+    answer: (providerCallId: string) => void answered.add(providerCallId),
+  }
+  return new Proxy(inner, {
+    get: (target, prop) => (prop in overrides ? overrides[prop] : Reflect.get(target, prop)),
+  }) as never
+}
+
+/**
+ * Delivers the status callback the provider sends for a Call, signed as the telephony would sign
+ * it, then waits for the background setup it may start. Returns the HTTP status.
+ */
+export async function reportStatus(
+  t: TestApp,
+  telephony: Pick<MemoryTelephony, 'sign'>,
+  organizationId: string,
+  callId: string,
+  callStatus: string,
+  sequence = '1'
+): Promise<number> {
+  const stored = await t.deps.calls.get(organizationId as never, callId as never)
+  t.deps.callEvents.addCall(organizationId, callId)
+  const pathAndQuery = `/webhooks/twilio/status?organizationId=${organizationId}&callId=${callId}`
+  const body = new URLSearchParams({
+    CallSid: stored?.providerCallSid ?? 'CAunknown',
+    CallStatus: callStatus,
+    SequenceNumber: sequence,
+    Timestamp: 'Thu, 01 Jan 2026 00:00:05 +0000',
+  }).toString()
+  const url = `${t.deps.env.WEBHOOK_BASE_URL ?? 'http://localhost'}${pathAndQuery}`
+  const response = await t.app.request(pathAndQuery, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-twilio-signature': telephony.sign(url, body),
+    },
+    body,
+  })
+  await idle()
+  return response.status
 }

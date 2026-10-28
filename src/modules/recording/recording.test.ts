@@ -9,6 +9,7 @@ import {
   createTestApp,
   identityOf,
   newOrganizationId,
+  reportStatus,
   type TestApp,
   type TestIdentity,
 } from '~/testing'
@@ -61,6 +62,7 @@ async function endedCall(who: TestIdentity = rep) {
     body: JSON.stringify({ to: PROSPECT }),
   })
   const callId = ((await response.json()) as { call: { id: string } }).call.id
+  await reportStatus(t, telephony, who.organizationId, callId, 'in-progress')
   const view = telephony.calls(who.organizationId).at(-1)
   if (view?.recordingId == null) {
     throw new Error('the Call has no Recording')

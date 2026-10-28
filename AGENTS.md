@@ -51,10 +51,14 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 - `src/modules/call/` places and lists Calls (`POST/GET /v1/calls`, `GET /v1/calls/{id}`,
   `PUT /v1/calls/{id}/wrap-up`). `state.ts` holds the one edge table (`canTransition`): `live` is
   unreachable without a stored Disclosure version, and the stores enforce it. Placing needs an
-  `Idempotency-Key`, stores the `ringing` Call in the idempotency transaction, then walks the
-  provider after commit: place, play the Disclosure (`DISCLOSURE_WORDING`, version 1, in
-  `service.ts`; no setting, ADR 0003), bridge the Rep, start the Recording, `live`. A Disclosure
-  failure ends the Call `failed`. Visibility: Rep own, Manager own plus `teamRepsOf`, Owner and
+  `Idempotency-Key`, stores the `ringing` Call in the idempotency transaction, then dials after
+  commit and leaves it `ringing` (the Copilot flag is kept in `copilot.dialed`, process memory). The
+  provider's `in-progress` status callback (`Calls.onProviderStatus`, via the webhook) claims
+  `ringing` to `connecting` and runs, in the background, the Disclosure (`DISCLOSURE_WORDING`,
+  version 1, in `service.ts`; no setting, ADR 0003), the bridge, the Recording, `live`; the
+  Disclosure step has `numberTimeoutMs` plus 20 s because the provider waits for the words. A
+  Disclosure failure ends the Call `failed`; no-answer, busy, failed and a hang-up while ringing
+  fail it with the matching reason. A lost Copilot flag fails the Call closed. Visibility: Rep own, Manager own plus `teamRepsOf`, Owner and
   Admin all; any other Call is `call.not_found`. `Calls.end` is service-only (no route yet).
   The place-Call path is not a hot path: a Rep places a few Calls a minute and it is bound by the
   provider's latency, so it has no benchmark.
