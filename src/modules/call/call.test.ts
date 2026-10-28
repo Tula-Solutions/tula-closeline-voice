@@ -449,3 +449,68 @@ describe('sweeping outbound Calls that never progressed', () => {
     expect((await stateOf(id)).state).toBe('live')
   })
 })
+
+describe('which Line a Call is placed from', () => {
+  const assignTo = async (assignment: Record<string, string>) => {
+    t.deps.clock.advance('1s') // distinct createdAt, so "oldest" is not a tie
+    const bought = await t.call(admin, 'POST', '/lines', { method: 'buy', country: 'US' })
+    const id = (bought.body as { id: string }).id
+    const assigned = await t.call(admin, 'PUT', `/lines/${id}/assignment`, assignment)
+    expect(assigned.status).toBe(200)
+    return id
+  }
+  const lineOf = async (who: TestIdentity) => {
+    const placed = await place(who, { to: PROSPECT })
+    expect(placed.status).toBe(201)
+    const stored = await t.deps.calls.get(
+      organizationId,
+      (placed.body as PlacedBody).call.id as never
+    )
+    return stored?.lineId as string | undefined
+  }
+  const member = (who: TestIdentity) => {
+    const id = formatId('mem', crypto.randomUUID())
+    t.deps.directory.addMembership(who.organizationId, who.userId, id)
+    t.deps.directory.addMember(who.organizationId, id, who.role)
+    return id
+  }
+
+  it('lets an Owner assigned a Line place a Call', async () => {
+    const owner = identityOf('owner', organizationId)
+    const line = await assignTo({ kind: 'rep', membershipId: member(owner) })
+    expect(await lineOf(owner)).toBe(line)
+  })
+
+  it('finds a Line assigned to the role for a member with it, not for one without', async () => {
+    const line = await assignTo({ kind: 'role', role: 'admin' })
+    const other = identityOf('admin', organizationId)
+    member(other)
+    expect(await lineOf(other)).toBe(line)
+    const manager = identityOf('manager', organizationId)
+    member(manager)
+    const refused = await place(manager, { to: PROSPECT })
+    expect(codeOf(refused.body)).toBe('call.line_unavailable')
+  })
+
+  it("does not use another Organization's Line", async () => {
+    const stranger = identityOf('admin', newOrganizationId())
+    member(stranger)
+    const refused = await place(stranger, { to: PROSPECT })
+    expect(codeOf(refused.body)).toBe('call.line_unavailable')
+  })
+
+  it('prefers the own Line, then a Team Line, then a role Line, the oldest first', async () => {
+    const who = identityOf('admin', organizationId)
+    const membershipId = member(who)
+    const teamId = formatId('team', crypto.randomUUID())
+    t.deps.directory.addTeam(organizationId, teamId)
+    t.deps.directory.addTeamMember(organizationId, teamId, membershipId)
+    const roleOld = await assignTo({ kind: 'role', role: 'admin' })
+    await assignTo({ kind: 'role', role: 'admin' })
+    expect(await lineOf(who)).toBe(roleOld)
+    const teamLine = await assignTo({ kind: 'team', teamId })
+    expect(await lineOf(who)).toBe(teamLine)
+    const own = await assignTo({ kind: 'rep', membershipId })
+    expect(await lineOf(who)).toBe(own)
+  })
+})

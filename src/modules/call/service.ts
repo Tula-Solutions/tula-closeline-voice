@@ -3,6 +3,7 @@ import {
   ERRORS,
   encodeCursor,
   formatId,
+  type LineAssignment,
   type ListVoiceCallsQuery,
   type PlaceCallRequest,
   type PlacedCall,
@@ -206,15 +207,32 @@ async function lineFor(
     }
     return line
   }
-  const [own] = await deps.lines.list(caller.organizationId, {
-    limit: 1,
-    state: 'active',
-    assignedToRep: membershipId,
-  })
-  if (own === undefined) {
-    throw domainError(VOICE_ERRORS['call.line_unavailable'])
+  // The caller's own Line first, then a Team's, then their role's; the oldest Line in each. Teams
+  // are looked up only when the own Line is missing, so a directory outage cannot block it.
+  const firstOf = async (assignedTo: LineAssignment) =>
+    (
+      await deps.lines.list(caller.organizationId, {
+        limit: 1,
+        state: 'active',
+        assignedTo,
+        oldestFirst: true,
+      })
+    )[0]
+  const own = await firstOf({ kind: 'rep', membershipId } as LineAssignment)
+  if (own !== undefined) {
+    return own
   }
-  return own
+  for (const teamId of await deps.directory.teamsOf(caller.organizationId, membershipId)) {
+    const found = await firstOf({ kind: 'team', teamId } as LineAssignment)
+    if (found !== undefined) {
+      return found
+    }
+  }
+  const byRole = await firstOf({ kind: 'role', role: caller.role })
+  if (byRole !== undefined) {
+    return byRole
+  }
+  throw domainError(VOICE_ERRORS['call.line_unavailable'])
 }
 
 /** Fails the Call, hangs the provider call up when there is one, and logs; never throws. */
@@ -650,6 +668,12 @@ export async function ringSet(
 ): Promise<string[]> {
   if (line.assignment.kind === 'rep') {
     return [line.assignment.membershipId]
+  }
+  if (line.assignment.kind === 'role') {
+    return (await deps.directory.roleMembers(organizationId, line.assignment.role)).slice(
+      0,
+      MAX_RINGING_REPS
+    )
   }
   if (line.assignment.kind === 'team') {
     return (await deps.directory.onlineRepsOfTeam(organizationId, line.assignment.teamId)).slice(
