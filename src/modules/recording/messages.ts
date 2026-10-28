@@ -1,4 +1,8 @@
-import { callIdSchema, voiceCallEndedEvent } from 'tula-closeline-contract'
+import {
+  callIdSchema,
+  voiceAgentCallEndedV2Event,
+  voiceCallEndedEvent,
+} from 'tula-closeline-contract'
 import {
   createMessageRegistry,
   defineMessage,
@@ -15,6 +19,14 @@ export const callEndedMessage = defineMessage({
   payload: voiceCallEndedEvent.schema.shape.data,
 })
 
+/** The published `voice.agent_call.ended` event (version 2), as a queue message of the contract's payload. */
+export const agentCallEndedMessage = defineMessage({
+  type: 'voice.agent_call.ended',
+  version: 2,
+  scope: 'organization',
+  payload: voiceAgentCallEndedV2Event.schema.shape.data,
+})
+
 /** Our own job: a Call reached a final state or its Recording is ready to copy. */
 export const finishRecordingMessage = defineMessage({
   type: 'voice.recording_finish',
@@ -28,9 +40,9 @@ export const finishRecordingMessage = defineMessage({
 })
 
 /** The registry of the events queue (what other services consume). */
-export const eventRegistry: MessageRegistry<typeof callEndedMessage> = createMessageRegistry([
-  callEndedMessage,
-])
+export const eventRegistry: MessageRegistry<
+  typeof callEndedMessage | typeof agentCallEndedMessage
+> = createMessageRegistry([callEndedMessage, agentCallEndedMessage])
 
 /** The registry of the jobs queue (what this service consumes). */
 export const jobRegistry: MessageRegistry<typeof finishRecordingMessage> = createMessageRegistry([
@@ -38,7 +50,7 @@ export const jobRegistry: MessageRegistry<typeof finishRecordingMessage> = creat
 ])
 
 /** An event envelope. */
-export type EventEnvelope = EnvelopeOf<typeof callEndedMessage>
+export type EventEnvelope = EnvelopeOf<typeof callEndedMessage | typeof agentCallEndedMessage>
 
 /** A job envelope. */
 export type JobEnvelope = EnvelopeOf<typeof finishRecordingMessage>

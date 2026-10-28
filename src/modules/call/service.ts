@@ -164,7 +164,7 @@ export async function withinDeadline<T>(
 }
 
 /** Why a provider failure ended the Call, as the contract names it. */
-function reasonOf(error: unknown): VoiceCallFailureReason {
+export function reasonOf(error: unknown): VoiceCallFailureReason {
   if (error instanceof TelephonyError) {
     if (error.code === TELEPHONY_ERROR_CODES.unavailable) {
       return 'timeout'

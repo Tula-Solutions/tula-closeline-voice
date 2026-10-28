@@ -1,11 +1,11 @@
-import type { TelephonyEventType } from 'tula-closeline-kit'
+import { type AnsweredBy, type TelephonyEventType, twilioAnsweredBy } from 'tula-closeline-kit'
 
 /** The longest provider event id the Call log stores. */
 export const MAX_PROVIDER_EVENT_ID_LENGTH = 200
 
 /** What a provider callback means for the Call, or why it changes nothing. */
 export type MappedCallback =
-  | { kind: 'event'; type: TelephonyEventType; eventId: string; at: Date }
+  | { kind: 'event'; type: TelephonyEventType; eventId: string; at: Date; answeredBy?: AnsweredBy }
   | { kind: 'ignored' }
   | { kind: 'invalid' }
 
@@ -50,6 +50,19 @@ export function mapStatusCallback(form: URLSearchParams, now: Date): MappedCallb
   const eventId = eventIdOf(`${callSid}:${callStatus}:${form.get('SequenceNumber') ?? '0'}`)
   return type && eventId
     ? { kind: 'event', type, eventId, at: occurredAt(form, now) }
+    : { kind: 'invalid' }
+}
+
+/** Maps the answering-machine detection callback; its id carries the verdict, so a later change is not a repeat. */
+export function mapDetectionCallback(form: URLSearchParams, now: Date): MappedCallback {
+  const callSid = form.get('CallSid')
+  if (!callSid) {
+    return { kind: 'invalid' }
+  }
+  const answeredBy = twilioAnsweredBy(form.get('AnsweredBy'))
+  const eventId = eventIdOf(`${callSid}:detection:${answeredBy}`)
+  return eventId
+    ? { kind: 'event', type: 'detection', eventId, at: occurredAt(form, now), answeredBy }
     : { kind: 'invalid' }
 }
 

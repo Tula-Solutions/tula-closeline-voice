@@ -1,6 +1,9 @@
 import {
   AgentCallOpenError,
   type AgentCallStore,
+  type ClaimOutcome,
+  type LineUsage,
+  lineIsFull,
   type NewAgentCall,
   type StoredAgentCall,
 } from '~/ports/agent-call-store'
@@ -39,6 +42,31 @@ export function createMemoryAgentCallStore(): MemoryAgentCallStore {
       organizations.set(organizationId, rows)
     }
     return rows
+  }
+  // One promise chain per Line stands in for the Postgres row lock.
+  const lineLocks = new Map<string, Promise<unknown>>()
+  const underLineLock = <T>(lineId: string, work: () => Promise<T>): Promise<T> => {
+    const run = (lineLocks.get(lineId) ?? Promise.resolve()).then(work, work)
+    lineLocks.set(
+      lineId,
+      run.catch(() => undefined)
+    )
+    return run
+  }
+  const usageOf = (organizationId: string, lineId: string, since: Date): LineUsage => {
+    const own = caps.get(lineId) ?? { concurrent: 3, daily: 150 }
+    const rows = all(organizationId).filter((r) => r.call.lineId === lineId)
+    const times = rows
+      .filter((r) => r.dialedAt && r.dialedAt >= since)
+      .map((r) => r.dialedAt as Date)
+      .sort((a, b) => a.getTime() - b.getTime())
+    return {
+      maxConcurrentAgentCalls: own.concurrent,
+      dailyAgentDialCap: own.daily,
+      open: rows.filter((r) => r.call.state === 'dialing' || r.call.state === 'live').length,
+      dials: times.length,
+      oldestDialAt: times[0] ?? null,
+    }
   }
   const all = (organizationId: string) => [...rowsOf(organizationId).values()]
   const toCall = (call: NewAgentCall): StoredAgentCall => ({
@@ -130,20 +158,63 @@ export function createMemoryAgentCallStore(): MemoryAgentCallStore {
       )
       return { dialed: rows.length, answered: rows.some((r) => r.call.result === 'answered') }
     },
-    lineUsage: async (organizationId, lineId, since) => {
-      const own = caps.get(lineId) ?? { concurrent: 3, daily: 150 }
-      const rows = all(organizationId).filter((r) => r.call.lineId === lineId)
-      const times = rows
-        .filter((r) => r.dialedAt && r.dialedAt >= since)
-        .map((r) => r.dialedAt as Date)
-        .sort((a, b) => a.getTime() - b.getTime())
-      return {
-        maxConcurrentAgentCalls: own.concurrent,
-        dailyAgentDialCap: own.daily,
-        open: rows.filter((r) => r.call.state === 'dialing' || r.call.state === 'live').length,
-        dials: times.length,
-        oldestDialAt: times[0] ?? null,
+    lineUsage: async (organizationId, lineId, since) => usageOf(organizationId, lineId, since),
+    claimDial: (organizationId, id, claim) => {
+      const row = rowsOf(organizationId).get(id)
+      if (row === undefined || row.call.state !== 'queued' || row.call.lineId === null) {
+        return Promise.resolve({ kind: 'gone' })
       }
+      const lineId = row.call.lineId
+      return underLineLock(lineId, async (): Promise<ClaimOutcome> => {
+        if (row.call.state !== 'queued') {
+          return { kind: 'gone' }
+        }
+        const usage = usageOf(organizationId, lineId, claim.since)
+        if (lineIsFull(usage)) {
+          return { kind: 'capped', usage }
+        }
+        const refusal = await claim.contactCheck()
+        if (refusal !== undefined) {
+          return { kind: 'refused', settlement: refusal }
+        }
+        row.numberHash = hex(claim.numberHash)
+        row.dialedAt = claim.at
+        row.call = {
+          ...row.call,
+          state: 'dialing',
+          callId: claim.callId,
+          retryAt: null,
+          gateCode: null,
+        } as StoredAgentCall
+        return { kind: 'claimed', call: { ...row.call } }
+      })
+    },
+    markLive: async (organizationId, id) => {
+      const row = rowsOf(organizationId).get(id)
+      if (row === undefined || row.call.state !== 'dialing') {
+        return undefined
+      }
+      row.call = { ...row.call, state: 'live' } as StoredAgentCall
+      return { ...row.call }
+    },
+    finish: async (organizationId, id, end) => {
+      const row = rowsOf(organizationId).get(id)
+      if (row === undefined || (row.call.state !== 'dialing' && row.call.state !== 'live')) {
+        return undefined
+      }
+      row.call = {
+        ...row.call,
+        state: 'ended',
+        result: end.result,
+        endReason: end.endReason,
+        durationSeconds: end.durationSeconds,
+        endedAt: end.at.toISOString(),
+      } as StoredAgentCall
+      return { ...row.call }
+    },
+    byCallId: async (organizationId, callId) => {
+      const row = all(organizationId).find((r) => r.call.callId === callId)
+      return row === undefined ? undefined : { ...row.call }
     },
     settle: async (organizationId, id, settlement) => {
       const row = rowsOf(organizationId).get(id)

@@ -49,7 +49,7 @@ type Spoken = { spoken: string; characters: number; interrupted: boolean }
  * audio was delivered; when `bargeIn` fires the open stream is cancelled and the rest is never
  * sent. A vendor failure ends the speech where it stood. Nothing here logs text or audio.
  */
-async function speakText(
+export async function speakText(
   deps: AgentCallDeps,
   organizationId: string,
   voice: string,
@@ -127,10 +127,65 @@ export async function answer(
   if (claimed === undefined) {
     return { kind: 'not_answerable' }
   }
+  const gone = await goLive(deps, organizationId, callId, providerCallId)
+  if (gone.kind === 'failed') {
+    return { kind: 'disclosure_failed' }
+  }
+  if (gone.kind === 'gone') {
+    return { kind: 'not_answerable' }
+  }
+  const live = gone.call
+  try {
+    const settings = (await deps.agentSettings.get(organizationId)) ?? DEFAULT_AGENT_SETTINGS
+    await speakText(
+      deps,
+      organizationId,
+      settings.voiceStyle,
+      settings.greeting,
+      input.sink,
+      undefined
+    )
+  } catch {
+    // Nobody drives a live Call that cannot greet, and only a turn checks the caps: end it now.
+    deps.logger.error('agent call greeting failed', { callId })
+    await end(deps, organizationId, live, 'agent_ended')
+    return { kind: 'greeting_failed' }
+  }
+  return { kind: 'live', call: live }
+}
+
+/** What taking a connecting Call live produced. */
+export type GoLiveOutcome =
+  | { kind: 'live'; call: StoredCall }
+  | { kind: 'failed' }
+  | { kind: 'gone' }
+
+/**
+ * Plays the Disclosure on a connecting Agent Call, starts the Recording and only then moves the
+ * Call to `live` (the store refuses `live` for an Agent without an AI-saying Disclosure). A late
+ * or failed Disclosure fails the Call and drops the line: nothing else ever happens on it.
+ */
+export async function goLive(
+  deps: Calls.CallDeps,
+  organizationId: string,
+  callId: VoiceCall['id'],
+  providerCallId: string
+): Promise<GoLiveOutcome> {
   let live: StoredCall | undefined
   let played = false
   try {
-    await deps.calls.transition(organizationId, callId, { to: 'disclosing', at: deps.clock.now() })
+    // This move is the claim: a duplicate delivery loses it and must not touch the Call.
+    try {
+      await deps.calls.transition(organizationId, callId, {
+        to: 'disclosing',
+        at: deps.clock.now(),
+      })
+    } catch (error) {
+      if (error instanceof InvalidTransitionError) {
+        return { kind: 'gone' }
+      }
+      throw error
+    }
     const heard = await Calls.withinDeadline(deps, (options) =>
       deps.telephony.playDisclosure(
         {
@@ -180,33 +235,14 @@ export async function answer(
       callId,
       invalid: error instanceof InvalidTransitionError,
     })
-    return { kind: 'disclosure_failed' }
+    return { kind: 'failed' }
   }
-  if (live === undefined) {
-    return { kind: 'not_answerable' }
-  }
-  try {
-    const settings = (await deps.agentSettings.get(organizationId)) ?? DEFAULT_AGENT_SETTINGS
-    await speakText(
-      deps,
-      organizationId,
-      settings.voiceStyle,
-      settings.greeting,
-      input.sink,
-      undefined
-    )
-  } catch {
-    // Nobody drives a live Call that cannot greet, and only a turn checks the caps: end it now.
-    deps.logger.error('agent call greeting failed', { callId })
-    await end(deps, organizationId, live, 'agent_ended')
-    return { kind: 'greeting_failed' }
-  }
-  return { kind: 'live', call: live }
+  return live === undefined ? { kind: 'gone' } : { kind: 'live', call: live }
 }
 
 /** Fails a Call that did not reach `live`, and drops the line; best effort. */
 async function fail(
-  deps: AgentCallDeps,
+  deps: Calls.CallDeps,
   organizationId: string,
   callId: VoiceCall['id'],
   providerCallId: string,
@@ -234,8 +270,8 @@ async function fail(
 }
 
 /** Ends a live Call as `ended` with the stored reason and drops the line; best effort for the line. */
-async function end(
-  deps: AgentCallDeps,
+export async function end(
+  deps: Calls.CallDeps,
   organizationId: string,
   call: StoredCall,
   endReason: NonNullable<VoiceCall['endReason']>
@@ -292,7 +328,7 @@ function costOf(
 }
 
 /** The next free Prospect turn index of a Call, from what is stored, so a restart picks up in place. */
-async function nextProspectIndex(
+export async function nextProspectIndex(
   deps: AgentCallDeps,
   organizationId: string,
   callId: string

@@ -22,6 +22,8 @@ import {
   systemClock,
   type TelephonyPort,
   type TokenVerifier,
+  type TtsAudioChunk,
+  type TtsPort,
 } from 'tula-closeline-kit'
 import { createBedrockLlm, DEFAULT_BEDROCK_FAST_MODEL } from 'tula-closeline-kit/llm'
 import { createSqsQueue } from 'tula-closeline-kit/queue'
@@ -95,6 +97,13 @@ import type { QualificationQuestionStore } from '~/ports/qualification-question-
 import type { QualificationStore } from '~/ports/qualification-store'
 import type { RecordingStore } from '~/ports/recording-store'
 import type { TwilioPurgeSource } from '~/ports/twilio-purge-source'
+
+/** What an Agent speaks with: the text-to-speech engine and where a Call's audio goes. */
+export type AgentAudio = {
+  tts: TtsPort
+  /** The audio leg of one Call, which receives the Agent's speech in order. */
+  sinkFor: (callId: string) => (chunk: TtsAudioChunk) => void
+}
 
 /** One dependency probe for `/readyz`: resolve when healthy, reject or stall when not. */
 export type ReadinessCheck = {
@@ -179,6 +188,11 @@ export type Container = {
   directory: OrganizationDirectory
   /** Clears expired Twilio rows; set only when the Postgres TwilioStore is in use (`twilio`). */
   twilioPurge?: TwilioPurgeSource
+  /**
+   * The voice and the audio leg an Agent speaks through. Unset until a speech engine and the media
+   * stream are wired (phase 2): a dialed Agent Call then hangs up after its Disclosure.
+   */
+  agentAudio?: AgentAudio
   /** Releases the database connections; safe to call more than once. */
   close: () => Promise<void>
   /** Probes run by `/readyz`: the database. */
@@ -241,6 +255,7 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
     ...(env.TWILIO_REGION ? { region: env.TWILIO_REGION } : {}),
     environment: env.ENVIRONMENT,
     statusCallbackUrl: `${callbacks}/status`,
+    detectionCallbackUrl: `${callbacks}/detection`,
     recordingStatusCallbackUrl: `${callbacks}/recording`,
     store: createPostgresTwilioStore(database),
   })

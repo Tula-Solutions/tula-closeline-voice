@@ -1,5 +1,6 @@
 import { formatId } from 'tula-closeline-contract'
 import { type Container, reportSafely } from '~/container'
+import { reapFailedCall } from '~/modules/agent-call-dial/service'
 import { DISCLOSURE_SPEECH_ALLOWANCE_MS } from '~/modules/call/service'
 import type { Caller } from '~/modules/caller'
 import { type Schedule, startSchedule } from '~/modules/purge/schedule'
@@ -7,7 +8,7 @@ import { type Schedule, startSchedule } from '~/modules/purge/schedule'
 /** What the sweep needs from the container. */
 export type SweepDeps = Pick<
   Container,
-  'calls' | 'telephony' | 'clock' | 'logger' | 'env' | 'numberTimeoutMs'
+  'calls' | 'telephony' | 'clock' | 'logger' | 'env' | 'numberTimeoutMs' | 'agentCalls' | 'events'
 >
 
 /** The most Calls one Organization's sweep marks `missed` per run; the next run takes the rest. */
@@ -113,6 +114,9 @@ export async function sweepStaleOutbound(
       failed += calls.length
       for (const call of calls) {
         deps.logger.warn('call.failed', { callId: call.id, reason: call.failureReason })
+        await reapFailedCall(deps, organizationId, call).catch(() =>
+          deps.logger.warn('call.reap.failed', { callId: call.id })
+        )
         if (call.providerCallSid !== null) {
           await deps.telephony
             .hangUp(
