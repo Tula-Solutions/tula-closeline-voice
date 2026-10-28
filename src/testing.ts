@@ -23,6 +23,10 @@ import {
 import { createMemoryAgentSettingsStore } from '~/adapters/memory/agent-settings-store'
 import { createMemoryAgentTurnStore } from '~/adapters/memory/agent-turn-store'
 import {
+  createMemoryBookingGateway,
+  type MemoryBookingGateway,
+} from '~/adapters/memory/booking-gateway'
+import {
   createMemoryCallEventStore,
   type MemoryCallEventStore,
 } from '~/adapters/memory/call-event-store'
@@ -46,6 +50,10 @@ import {
   type MemoryOrganizationDirectory,
 } from '~/adapters/memory/organization-directory'
 import { createMemoryQualificationQuestionStore } from '~/adapters/memory/qualification-question-store'
+import {
+  createMemoryQualificationStore,
+  type MemoryQualificationStore,
+} from '~/adapters/memory/qualification-store'
 import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
 import { loadEnv } from '~/env'
@@ -97,6 +105,8 @@ export type TestDeps = Container & {
   idempotency: MemoryIdempotencyStore
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
+  qualification: MemoryQualificationStore
+  booking: MemoryBookingGateway
   callEvents: MemoryCallEventStore
   calls: MemoryCallStore
   /** Every JSON log line written, in order. */
@@ -137,6 +147,8 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     lines: createMemoryLineStore(),
     agentSettings: createMemoryAgentSettingsStore(),
     questions: createMemoryQualificationQuestionStore(),
+    qualification: createMemoryQualificationStore(),
+    booking: createMemoryBookingGateway(),
     turns: createMemoryAgentTurnStore(
       () => new Date(),
       (org, id, n) => calls.addAgentCost(org, id, n)

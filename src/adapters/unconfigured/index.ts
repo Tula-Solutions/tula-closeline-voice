@@ -1,6 +1,7 @@
 import { ERRORS } from 'tula-closeline-contract'
 import type { StreamingTranscribePort, TelephonyPort } from 'tula-closeline-kit'
 import { AppError } from 'tula-closeline-kit'
+import { BookingFailedError, type BookingGateway } from '~/ports/booking-gateway'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
@@ -61,4 +62,12 @@ export function createUnconfiguredEvidenceSearch(): EvidenceSearch {
 /** Speech-to-text for a deployment with no vendor key: opening a stream fails closed. */
 export function createUnconfiguredStreamingTranscribe(): StreamingTranscribePort {
   return { open: async () => Promise.reject(unavailable()) }
+}
+
+/** A booking gateway for a deployment with no booking link wired: it offers nothing and books nothing. */
+export function createUnconfiguredBookingGateway(): BookingGateway {
+  return {
+    slots: async () => Promise.reject(new BookingFailedError('booking not configured')),
+    book: async () => Promise.reject(new BookingFailedError('booking not configured')),
+  }
 }
