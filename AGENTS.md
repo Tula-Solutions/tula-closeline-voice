@@ -76,6 +76,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   (`speech_to_text_failed` | `stream_dropped`, in Postgres, so any instance's SSE stream sees it) and
   the stream says so. An SSE stream ends after `container.copilot.maxStreamMs` (5 minutes); the client
   reconnects with `Last-Event-ID`, which re-checks its token.
+  `GET /v1/calls/{callId}/transcript` (`page.ts`) is the stored Transcript, cursor `{index}`: turns only when the Call's `transcriptState` is `ready`, `deleted` once the Recording is, else `pending` with no turns. Nothing sets `ready` yet.
 - `src/modules/media/` is the Twilio Media Streams receiver, answered by `serveOptions` (`src/http/serve.ts`)
   before the app: `GET /media/<org>/<callId>` with `Upgrade: websocket`. The upgrade
   needs a valid `X-Twilio-Signature` (`telephony.verifyWebhook`, empty body, URL rebuilt from
