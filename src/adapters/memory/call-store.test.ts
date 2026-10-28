@@ -83,6 +83,16 @@ describe('the memory Call store', () => {
     )
   })
 
+  it('marks the Transcript unavailable for its own Organization only', async () => {
+    const store = createMemoryCallStore()
+    const call = await store.insert(ORG, newCall())
+    expect(call.transcriptUnavailable).toBeNull()
+    await store.markTranscriptUnavailable(OTHER_ORG, call.id, 'stream_dropped')
+    expect((await store.get(ORG, call.id))?.transcriptUnavailable).toBeNull()
+    await store.markTranscriptUnavailable(ORG, call.id, 'stream_dropped')
+    expect((await store.get(ORG, call.id))?.transcriptUnavailable).toBe('stream_dropped')
+  })
+
   it('shows another Organization nothing', async () => {
     const store = createMemoryCallStore()
     const call = await store.insert(ORG, newCall())

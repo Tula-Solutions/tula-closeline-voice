@@ -64,17 +64,30 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   provider's latency, so it has no benchmark.
 - `src/modules/transcript/` is the Copilot live Transcript. A Rep dials with `copilot: true`; the Call
   plays `COPILOT_DISCLOSURE_WORDING` (version 3, `aiAssisted`, no setting, ADR 0003) and only after it is
-  stored and the Call is `live` does `Transcript.start` fork both tracks (`forkTracks`) and open one
-  speech-to-text stream per track (`transcribe` port: AssemblyAI when `ASSEMBLYAI_API_KEY` is set, the
+  stored and the Call is `live` does `Transcript.start` fork both tracks (`forkTracks`) to
+  `wss://<WEBHOOK_BASE_URL>/media/<org>/<callId>`. When Twilio connects there,
+  `Transcript.attach` opens one speech-to-text stream per track (`transcribe` port: AssemblyAI when `ASSEMBLYAI_API_KEY` is set, the
   kit memory stand-in when `ENVIRONMENT=local`, else fails closed). A Call is a Copilot Call when its
   stored Disclosure has `aiAssisted` and it has a Rep. Final turns are saved once each through
   `CallTurnStore` (`voice.call_turns`, sequence per track; O(1) per turn, no hot-path benchmark).
   `GET /v1/calls/{callId}/copilot/stream` is SSE (`copilot.status`, `transcript.turn`,
   `transcript.unavailable`); ids are cursors `r<n>.p<m>` and `Last-Event-ID` resumes from the store.
-  A speech-to-text failure never touches the Call: it marks the Transcript unavailable and the stream
-  says so. Shortcut: open streams and the unavailable flag live in process memory (one instance,
-  `container.copilot`); move them to a column before running more than one instance. The Twilio media
-  websocket that feeds `Transcript.pushAudio` is not built yet.
+  A speech-to-text failure never touches the Call: it sets `voice.calls.transcript_unavailable`
+  (`speech_to_text_failed` | `stream_dropped`, in Postgres, so any instance's SSE stream sees it) and
+  the stream says so. An SSE stream ends after `container.copilot.maxStreamMs` (5 minutes); the client
+  reconnects with `Last-Event-ID`, which re-checks its token.
+- `src/modules/media/` is the Twilio Media Streams receiver, answered by `serveOptions` (`src/http/serve.ts`)
+  before the app: `GET /media/<org>/<callId>` with `Upgrade: websocket`. The upgrade
+  needs a valid `X-Twilio-Signature` (`telephony.verifyWebhook`, empty body, URL rebuilt from
+  `WEBHOOK_BASE_URL` in its `ws` and `http` forms, never from `Host`) and a Copilot Call of that
+  Organization, else 403/404 with no upgrade. `start.callSid` must equal the Call's provider id.
+  `media` frames: `inbound` is the Prospect, `outbound` the Rep (the fork sits on the Prospect's leg;
+  unverified against real Twilio). Frames are capped (16 KiB), idle sockets close after 60 s and no
+  socket outlives 12 hours. A socket that ends without Twilio's `stop` while the Call is still
+  live marks the Transcript `stream_dropped`: Twilio does not reconnect, so the flag is sticky for the Call. The open STT streams are
+  per-socket, in this instance's memory (`container.copilot.streams`); a second socket for the same
+  Call on the same instance is refused. The Copilot does not speak, so no TTS is wired here (the
+  Cartesia adapter belongs to the Inbound Agent).
 - Ports (`src/ports/`): `CallStore` (Postgres and memory; every event row is written in the same
   transaction as the change), `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
   requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
