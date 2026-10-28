@@ -21,7 +21,7 @@ import {
   type TelephonyPort,
   type TokenVerifier,
 } from 'tula-closeline-kit'
-import { createBedrockLlm } from 'tula-closeline-kit/llm'
+import { createBedrockLlm, DEFAULT_BEDROCK_FAST_MODEL } from 'tula-closeline-kit/llm'
 import { createSqsQueue } from 'tula-closeline-kit/queue'
 import { createS3ObjectStore } from 'tula-closeline-kit/storage'
 import {
@@ -252,8 +252,14 @@ function createTranscribe(env: Env): StreamingTranscribePort {
     : createUnconfiguredStreamingTranscribe()
 }
 
+/** Voice needs no strong model: both tiers are Haiku 5.5. */
+export const VOICE_LLM_MODELS = {
+  fast: DEFAULT_BEDROCK_FAST_MODEL,
+  smart: DEFAULT_BEDROCK_FAST_MODEL,
+}
+
 function createLlm(env: Env, logger: Logger): LlmPort {
-  return createBedrockLlm({ region: env.AWS_REGION, logger })
+  return createBedrockLlm({ region: env.AWS_REGION, logger, models: VOICE_LLM_MODELS })
 }
 
 /** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */

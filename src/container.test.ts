@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { signTwilioRequest } from 'tula-closeline-kit'
-import { createContainer, reportSafely } from './container'
+import { DEFAULT_BEDROCK_FAST_MODEL } from 'tula-closeline-kit/llm'
+import { createContainer, reportSafely, VOICE_LLM_MODELS } from './container'
 import { loadEnv } from './env'
 
 test('the default reportError logs the failure with its request context at error level', () => {
@@ -182,4 +183,12 @@ test('twilio in a deployed environment runs on the durable store, not the fail-c
   })
   expect(token).toBeDefined()
   await container.close()
+})
+
+test('both model tiers are Haiku 5.5', () => {
+  expect(VOICE_LLM_MODELS).toEqual({
+    fast: DEFAULT_BEDROCK_FAST_MODEL,
+    smart: DEFAULT_BEDROCK_FAST_MODEL,
+  })
+  expect(DEFAULT_BEDROCK_FAST_MODEL).toBe('anthropic.claude-haiku-5-5')
 })
