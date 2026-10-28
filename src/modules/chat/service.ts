@@ -185,15 +185,29 @@ export async function start(
   }
 }
 
-/** The next free even turn index of the Chat (a Prospect turn). */
-async function nextIndex(deps: ChatDeps, organizationId: string, chatId: string): Promise<number> {
+/**
+ * The even turn index for this message: the next free one, or the index of an unanswered turn
+ * with the same text (a send that failed after storing it), so a retry never stores it twice.
+ */
+async function nextIndex(
+  deps: ChatDeps,
+  organizationId: string,
+  chatId: string,
+  text: string
+): Promise<number> {
   const [latest] = await deps.turns.recent(
     organizationId,
     { kind: 'chat', id: chatId },
     Number.MAX_SAFE_INTEGER,
     1
   )
-  return latest === undefined ? 0 : latest.index + 1 + ((latest.index + 1) % 2)
+  if (latest === undefined) {
+    return 0
+  }
+  if (latest.role === 'prospect' && latest.text === text) {
+    return latest.index
+  }
+  return latest.index + 1 + ((latest.index + 1) % 2)
 }
 
 /**
@@ -220,7 +234,7 @@ export async function send(
       async () => {
         const conversation = { kind: 'chat' as const, id: chat.id }
         for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt += 1) {
-          const turnIndex = await nextIndex(deps, organizationId, chat.id)
+          const turnIndex = await nextIndex(deps, organizationId, chat.id, input.text)
           if (turnIndex / 2 >= MAX_CHAT_MESSAGES) {
             throw domainError(CHAT_ERRORS['chat.session_closed'])
           }

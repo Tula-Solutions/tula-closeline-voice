@@ -147,6 +147,24 @@ describe('sending messages', () => {
     expect(t.deps.llm.requests()).toHaveLength(1)
   })
 
+  test('a send that failed after the visitor turn was stored is retried at the same index', async () => {
+    const token = await open()
+    const search = t.deps.evidence.search
+    t.deps.evidence.search = async () => {
+      t.deps.evidence.search = search
+      throw new Error('playbook down')
+    }
+    const key = `msg-${crypto.randomUUID()}`
+    const failed = await send(token, 'What plans do you have?', key)
+    expect(failed.status).toBeGreaterThanOrEqual(500)
+    t.deps.llm.reply(reply())
+    const retried = await send(token, 'What plans do you have?', key)
+    expect(retried.status).toBe(200)
+    const listed = await call('GET', `/v1/public/chat/sessions/${token}/messages`)
+    const roles = (listed.body.items as { role: string }[]).map((m) => m.role)
+    expect(roles).toEqual(['agent', 'prospect', 'agent'])
+  })
+
   test('the same key with other text is request.idempotency_key_reused', async () => {
     const token = await open()
     t.deps.llm.reply(reply())
