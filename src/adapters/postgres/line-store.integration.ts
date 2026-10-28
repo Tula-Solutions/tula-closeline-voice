@@ -107,6 +107,27 @@ describe('the Postgres Line store', () => {
     expect((await store.release(org, line.id, new Date()))?.releasedAt).toBe(at.toISOString())
   })
 
+  test('stores a role assignment and finds the oldest Line assigned to it', async () => {
+    const org = newOrganization()
+    const older = await store.insert(org, newLine(new Date('2026-01-01T00:00:00.000Z')))
+    const newer = await store.insert(org, newLine(new Date('2026-01-02T00:00:00.000Z')))
+    for (const line of [newer, older]) {
+      const assigned = await store.assign(org, line.id, { kind: 'role', role: 'admin' })
+      expect(assigned?.assignment).toEqual({ kind: 'role', role: 'admin' })
+    }
+    const [first] = await store.list(org, {
+      limit: 1,
+      assignedTo: { kind: 'role', role: 'admin' },
+      oldestFirst: true,
+    })
+    expect(first?.id).toBe(older.id)
+    expect(
+      await store.list(org, { limit: 5, assignedTo: { kind: 'role', role: 'owner' } })
+    ).toEqual([])
+    const back = await store.assign(org, older.id, { kind: 'unassigned' })
+    expect(back?.assignment).toEqual({ kind: 'unassigned' })
+  })
+
   test('another Organization cannot read, list, assign or release a Line', async () => {
     const owner = newOrganization()
     const outsider = newOrganization()

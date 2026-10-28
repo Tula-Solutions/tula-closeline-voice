@@ -37,8 +37,10 @@ const place = createRoute({
   summary: 'Place a Call to a Prospect',
   description:
     'Any voice role. Needs an `Idempotency-Key`: the same key with the same request places one ' +
-    'Call and answers 200 with it, for 24 hours. The Disclosure plays before the Rep is bridged ' +
-    'and before the recording starts, on every Call; there is no setting for it. A Contact Check ' +
+    'Call and answers 200 with it, for 24 hours. The Call is dialled and answers `ringing`; ' +
+    'the Disclosure plays only once the Prospect answers, before the Rep is bridged and before ' +
+    'the recording starts, on every Call; there is no setting for it. Poll `GET /v1/calls/{id}` ' +
+    'for `live` or `failed`. A Contact Check ' +
     'denial is a warning on the placed Call, never a refusal.',
   security,
   request: {
@@ -47,7 +49,7 @@ const place = createRoute({
   },
   responses: {
     200: placedBody('The Call this Idempotency-Key placed earlier; nothing was dialled again.'),
-    201: placedBody('The Call, `live` once the Disclosure has played and the Rep is bridged.'),
+    201: placedBody('The Call, `ringing`; it goes `live` after the Prospect answers.'),
     400: errorResponse('request.invalid'),
     401: unauthorized,
     403: errorResponse('auth.forbidden'),
@@ -60,7 +62,6 @@ const place = createRoute({
       'call.number_invalid, or request.idempotency_key_reused: the key was used for another request.'
     ),
     500: serverError,
-    502: errorResponse('call.disclosure_failed: the Disclosure did not play; the Call failed.'),
     503: errorResponse('server.unavailable: the telephony provider did not answer.'),
   },
 })
@@ -155,6 +156,27 @@ const answerInbound = createRoute({
   },
 })
 
+const hangUp = createRoute({
+  method: 'post',
+  path: '/calls/{callId}/hangup',
+  tags: ['calls'],
+  summary: 'Hang up a Call',
+  description:
+    'The Rep on the Call (or an Owner or Admin) ends it at the provider; a `live` Call becomes ' +
+    '`ended`, by the Rep. A Call that is not live is returned as it is.',
+  security,
+  request: { params: voiceCallParamsSchema },
+  responses: {
+    200: callBody('The Call.'),
+    400: errorResponse('request.invalid'),
+    401: unauthorized,
+    403: errorResponse('auth.forbidden'),
+    404: errorResponse('call.not_found'),
+    500: serverError,
+    503: errorResponse('server.unavailable: the telephony provider did not answer.'),
+  },
+})
+
 /** The Calls of the caller's Organization. Mounted behind the access-token middleware. */
 export function createCallRouter(container: Container): OpenAPIHono<AuthedEnv> {
   const router = createRouter<AuthedEnv>()
@@ -184,6 +206,9 @@ export function createCallRouter(container: Container): OpenAPIHono<AuthedEnv> {
   )
   router.openapi(answerInbound, async (c) =>
     c.json(await Calls.answer(container, callerOf(c), c.req.valid('param').callId), 200)
+  )
+  router.openapi(hangUp, async (c) =>
+    c.json(await Calls.hangUp(container, callerOf(c), c.req.valid('param').callId), 200)
   )
 
   return router

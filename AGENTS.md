@@ -20,6 +20,8 @@ from the hub (`tula-closeline`). This file holds only what is specific to this r
 
 Other scripts are in `package.json`.
 
+Every voice model call uses one model: `voiceLlmModels` in `src/container.ts` sets both the fast and smart tiers to `LLM_MODEL` (a bare `anthropic.*` id; the kit adds the Region's profile prefix), else the kit's `DEFAULT_BEDROCK_FAST_MODEL` (Haiku 5.5). Where AWS has not approved Claude 5.x, set `LLM_MODEL=anthropic.claude-haiku-4-5-20251001-v1:0`.
+
 ## Layout
 
 The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>/`.
@@ -45,33 +47,51 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   goes through `withOrganization` (`src/adapters/postgres/line-store.ts`). `providerSid` never
   leaves the service.
 - `src/modules/agent-settings/` is the Inbound Agent settings and Qualification questions (`GET/PUT /v1/agent/settings`, `GET/POST /v1/agent/questions`, `GET/PATCH/DELETE /v1/agent/questions/{id}`, `PUT /v1/agent/question-order`). Reads need Owner, Admin or Manager; writes need Owner or Admin. No row means the defaults, with the Agent paused. `Agent.isPaused` / `assertNotPaused` (`agent.paused`) are for the conversation engine to call before answering or calling back. Questions are one ordered list per Organization (max 50, positions 1..n); every change goes through the store's `change`, which locks per Organization, and skip logic may only name an earlier question. No setting touches the Disclosure, the recording notice or the consent gate (ADR 0003).
-- `src/modules/agent-call-request/` is the outbound Agent Call request and its gate (ADR 0030): `POST /internal/v1/agent-calls` (outbound, shared secret plus `X-Organization-Id`; the key must be `enrollment:step:attempt`) and `POST /v1/agent-calls` (Owner, Admin, Manager, Rep, for a Prospect they can see, with an `Idempotency-Key`). `evaluateGate` is the fixed order: Agents paused, Contact Check (core; a failure is `consent.unavailable`), calling window 08:00 to 21:00 in the Prospect's zone, attempt limits (3 per Step, 1 dial per number per local day, 3 per rolling 7 days, all `agent_call.attempts_exhausted`), then the Line caps (`max_concurrent_agent_calls`, `daily_agent_dial_cap`), which defer with `agent_call.line_cap_reached` and a `retryAt` and use no attempt. A refusal is a stored `ended`/`blocked` row with `gateCode` (201); an allowed or deferred one is `queued`. Counts come from stored rows, never memory. Nothing turns the gate off. `recheck` re-runs the gate on a queued row: the dialer (T8) must call it just before dialing. Prospects come from the `ProspectDirectory` port (memory and unconfigured only until core has an internal Prospect route); the Contact Check is kit's `ContactGuard`. Not built yet: the GET/list routes, persisting `goal`, the org-level `agents_paused` switch, the 4 hour retry gap (outbound schedules it).
+- `src/modules/agent-call-request/` is the outbound Agent Call request and its gate (ADR 0030): `POST /internal/v1/agent-calls` (outbound, shared secret plus `X-Organization-Id`; the key must be `enrollment:step:attempt`) and `POST /v1/agent-calls` (Owner, Admin, Manager, Rep, for a Prospect they can see, with an `Idempotency-Key`). `evaluateGate` is the fixed order: Agents paused, Contact Check (core; a failure is `consent.unavailable`), calling window 08:00 to 21:00 in the Prospect's zone, attempt limits (3 per Step, 1 dial per number per local day, 3 per rolling 7 days, all `agent_call.attempts_exhausted`), then the Line caps (`max_concurrent_agent_calls`, `daily_agent_dial_cap`), which defer with `agent_call.line_cap_reached` and a `retryAt` and use no attempt. A refusal is a stored `ended`/`blocked` row with `gateCode` (201); an allowed or deferred one is `queued`. Counts come from stored rows, never memory. Nothing turns the gate off. A core outage stores an `ended`/`blocked` row (`consent.unavailable`) under the Step key, so outbound retries with the next attempt number. `recheck` re-runs the gate on a queued row: the dialer (T8) must call it just before dialing. Prospects come from the `ProspectDirectory` port (memory and unconfigured only until core has an internal Prospect route); the Contact Check is kit's `ContactGuard`. Not built yet: the GET/list routes, persisting `goal`, the org-level `agents_paused` switch, the 4 hour retry gap (outbound schedules it).
 - `src/modules/agent-tools/` runs the Inbound Agent's tools for a live Call: `contextFor(deps, scope)` says what the model may use (the one pending Qualification question, and the free times offered when the last Agent turn was `find_slots` or `book`); `run(deps, scope, toolCall)` runs `record_answer`, `find_slots` or `book` and returns what the Agent says (`{say, replace}`), or `null` for the other tools (`hand_off`, `end_call`, `revoke_consent` belong to other tickets). `record_answer` accepts only the pending question, parses the answer by kind (a failure re-asks), records skipped questions as `skipped`, and stores a summary (max 2000 characters) when none is left. Beside a tool call the model's own text is never spoken, only what the tool says. `book` re-reads the free times and books only one offered on the previous turn, with the idempotency key `voice-book-<callId>-<turnIndex>`; a failure is told to the Prospect with other times. The `QualificationStore` port (Postgres `voice.inquiries` / `qualification_answers`; no Inquiry for the Call means nothing is recorded, the intake ticket creates it) and the `BookingGateway` port (memory adapter, or `src/adapters/core-http/booking-gateway.ts` over core's public Booking Type link routes: 3 s per attempt, 2 jittered retries on a network error or 5xx, every failure a `BookingFailedError`) are the only ways out. Over HTTP the Prospect's contact is a fixed placeholder in `local` only, so `book` fails closed elsewhere until core has a contact lookup. Tool arguments are validated; model output is untrusted.
 - `src/modules/conversation/` is the Inbound Agent engine in text mode: `converse(deps, {organizationId, conversation: {kind: 'call'|'chat'|'try', id}, turnIndex, text})`. `turnIndex` is the Prospect turn's even index and the idempotency key (the Agent turn is `turnIndex + 1`); a retry returns the stored exchange (`replayed: true`, `toolCall: null`) and never asks the model again. Order: `assertNotPaused`, retrieve evidence through the `EvidenceSearch` port (Organization-scoped; Documents are citable, Moments are wording examples only), defer to a Rep without calling the model when fewer than `MIN_EVIDENCE_PASSAGES` (1) passages reach `MIN_EVIDENCE_SCORE` (0.5, a starting value to tune), else `LlmPort.complete` with a Zod schema (reply, cited labels, deferred, at most one tool call from the contract's `AGENT_TOOLS` with strict arguments). A reply that cites nothing, cites a passage that was not retrieved, or breaks the schema (an out-of-set tool included) is stored as a deferral. Retrieved text and the Prospect message go into delimited, escaped data sections, never into instructions. The engine validates a tool call but never runs it. `AgentTurnStore` (`voice.agent_turns` and `agent_turn_sources`) is the only way to reach the turns; the production `EvidenceSearch` is `src/adapters/playbook-http/` (the Playbook's `POST /internal/v1/playbook/search/documents`, bearer secret and `X-Organization-Id`; 2.5 s per attempt, one jittered retry on a timeout or 503, the Playbook's 504 is `server.timeout`, every other failure `server.unavailable`; no Moments until an internal route exists). `MIN_EVIDENCE_SCORE` is still untuned: it needs real Playbook scores.
 - `src/modules/handoff/` is the warm Handoff of an Agent Call to a Rep: `start(deps, {organizationId, callId, reason})` (called by `AgentCall.hear` on a `hand_off` tool call or a deferral) rings the Line's Rep or its Team's online Reps one at a time (max 5, `HANDOFF_RING_TIMEOUT_MS` each), plays the Disclosure line (`HANDOFF_DISCLOSURE_WORDING`) before `telephony.bridge`, seeds the Copilot Transcript with the earlier turns, and stores the timing; with no Rep it writes a `no_rep` row and the Agent offers a Booking. `POST /v1/handoffs/{id}/accept|decline` answer an offer. Not a hot path, no benchmark. Core has no presence route yet, so "online" is the Team's online Reps and a decline or timeout means unavailable.
 - `src/modules/call/` places and lists Calls (`POST/GET /v1/calls`, `GET /v1/calls/{id}`,
   `PUT /v1/calls/{id}/wrap-up`). `state.ts` holds the one edge table (`canTransition`): `live` is
   unreachable without a stored Disclosure version, and the stores enforce it. Placing needs an
-  `Idempotency-Key`, stores the `ringing` Call in the idempotency transaction, then walks the
-  provider after commit: place, play the Disclosure (`DISCLOSURE_WORDING`, version 1, in
-  `service.ts`; no setting, ADR 0003), bridge the Rep, start the Recording, `live`. A Disclosure
-  failure ends the Call `failed`. Visibility: Rep own, Manager own plus `teamRepsOf`, Owner and
-  Admin all; any other Call is `call.not_found`. `Calls.end` is service-only (no route yet).
+  `Idempotency-Key`, stores the `ringing` Call in the idempotency transaction, then dials after
+  commit and leaves it `ringing` (the Copilot flag is stored on the Call, `voice.calls.copilot`, so any instance can take the answer; `sweepStaleOutbound` in `missed-sweep.ts` fails outbound Calls left `ringing` as `no_answer` or `connecting` as `provider_error` after twice `RING_TIMEOUT_MS` plus the Disclosure allowance). The
+  provider's `in-progress` status callback (`Calls.onProviderStatus`, via the webhook) claims
+  `ringing` to `connecting` and runs, in the background, the Disclosure (`DISCLOSURE_WORDING`,
+  version 1, in `service.ts`; no setting, ADR 0003), the bridge, the Recording, `live`; the
+  Disclosure step has `numberTimeoutMs` plus 20 s because the provider waits for the words. A
+  Disclosure failure ends the Call `failed`; no-answer, busy, failed and a hang-up while ringing
+  fail it with the matching reason. A lost Copilot flag fails the Call closed. Visibility: Rep own, Manager own plus `teamRepsOf`, Owner and
+  Admin all; any other Call is `call.not_found`. `POST /v1/calls/{id}/hangup` (the Rep on the Call, Owner or Admin) ends the provider call and records a `live` Call `ended` by the Rep; mute and hold are the browser SDK's, the telephony port has no server-side mute or hold.
   The place-Call path is not a hot path: a Rep places a few Calls a minute and it is bound by the
   provider's latency, so it has no benchmark.
 - `src/modules/transcript/` is the Copilot live Transcript. A Rep dials with `copilot: true`; the Call
   plays `COPILOT_DISCLOSURE_WORDING` (version 3, `aiAssisted`, no setting, ADR 0003) and only after it is
-  stored and the Call is `live` does `Transcript.start` fork both tracks (`forkTracks`) and open one
-  speech-to-text stream per track (`transcribe` port: AssemblyAI when `ASSEMBLYAI_API_KEY` is set, the
+  stored and the Call is `live` does `Transcript.start` fork both tracks (`forkTracks`) to
+  `wss://<WEBHOOK_BASE_URL>/media/<org>/<callId>`. When Twilio connects there,
+  `Transcript.attach` opens one speech-to-text stream per track (`transcribe` port: AssemblyAI when `ASSEMBLYAI_API_KEY` is set, the
   kit memory stand-in when `ENVIRONMENT=local`, else fails closed). A Call is a Copilot Call when its
   stored Disclosure has `aiAssisted` and it has a Rep. Final turns are saved once each through
   `CallTurnStore` (`voice.call_turns`, sequence per track; O(1) per turn, no hot-path benchmark).
   `GET /v1/calls/{callId}/copilot/stream` is SSE (`copilot.status`, `transcript.turn`,
   `transcript.unavailable`); ids are cursors `r<n>.p<m>` and `Last-Event-ID` resumes from the store.
-  A speech-to-text failure never touches the Call: it marks the Transcript unavailable and the stream
-  says so. Shortcut: open streams and the unavailable flag live in process memory (one instance,
-  `container.copilot`); move them to a column before running more than one instance. The Twilio media
-  websocket that feeds `Transcript.pushAudio` is not built yet.
+  A speech-to-text failure never touches the Call: it sets `voice.calls.transcript_unavailable`
+  (`speech_to_text_failed` | `stream_dropped`, in Postgres, so any instance's SSE stream sees it) and
+  the stream says so. An SSE stream ends after `container.copilot.maxStreamMs` (5 minutes); the client
+  reconnects with `Last-Event-ID`, which re-checks its token.
+  `GET /v1/calls/{callId}/transcript` (`page.ts`) is the stored Transcript, cursor `{index}`: turns only when the Call's `transcriptState` is `ready`, `deleted` once the Recording is, else `pending` with no turns. Nothing sets `ready` yet.
+- `src/modules/media/` is the Twilio Media Streams receiver, answered by `serveOptions` (`src/http/serve.ts`)
+  before the app: `GET /media/<org>/<callId>` with `Upgrade: websocket`. The upgrade
+  needs a valid `X-Twilio-Signature` (`telephony.verifyWebhook`, empty body, URL rebuilt from
+  `WEBHOOK_BASE_URL` in its `ws` and `http` forms, never from `Host`) and a Copilot Call of that
+  Organization, else 403/404 with no upgrade. `start.callSid` must equal the Call's provider id.
+  `media` frames: `inbound` is the Prospect, `outbound` the Rep (the fork sits on the Prospect's leg;
+  unverified against real Twilio). Frames are capped (16 KiB), idle sockets close after 60 s and no
+  socket outlives 12 hours. A socket that ends without Twilio's `stop` while the Call is still
+  live marks the Transcript `stream_dropped`: Twilio does not reconnect, so the flag is sticky for the Call. The open STT streams are
+  per-socket, in this instance's memory (`container.copilot.streams`); a second socket for the same
+  Call on the same instance is refused. The Copilot does not speak, so no TTS is wired here (the
+  Cartesia adapter belongs to the Inbound Agent).
 - Ports (`src/ports/`): `CallStore` (Postgres and memory; every event row is written in the same
   transaction as the change), `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
   requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
@@ -80,8 +100,12 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   `/internal/v1/directory/*` routes with a per-attempt timeout and bounded jittered retry on
   network errors and 5xx, and any failure is `server.unavailable`; an Organization that is not
   `active` has no Membership). Memory adapters are in `src/adapters/memory/`;
-  `src/adapters/unconfigured/` fails closed with `server.unavailable` until the Twilio number
-  adapter exists.
+  `src/adapters/twilio/number-provisioner.ts` is the Twilio `NumberProvisioner` (API key over basic
+  auth; 5 s per attempt, 3 jittered attempts for reads only, the purchase POST is never retried):
+  `buy` searches then buys, names it `Closeline (bought)` and points `VoiceUrl` at
+  `/webhooks/twilio/inbound`; `port` attaches a number the account already owns, any other is
+  `line.number_unavailable`; `release` deletes only a `Closeline (bought)` number, else clears its
+  `VoiceUrl`. `src/adapters/unconfigured/` fails closed with `server.unavailable` elsewhere.
 - `src/modules/recording/` copies a Call's Recording and announces the Call. A final Call state (wrapped by `publishOnFinal`) and a completed recording callback queue a `voice.recording_finish` job on `JOBS_QUEUE_URL`; `runJobs` (scheduled from `server.ts`) runs `finish`, which streams the Recording from the provider into the object store at `recordings/<callId>.wav` (size capped by `RECORDING_MAX_BYTES`), publishes `voice.call.ended` on `QUEUE_URL` with an id derived from the Call id (so a redelivery repeats the same id), then marks the row `stored` and deletes the provider's copy. `GET/DELETE /v1/calls/{id}/recording`: a 300 s signed URL for the caller's visible Calls; delete is Owner/Admin and schedules the file `RECORDING_PURGE_DELAY_MS` out, `purgeRecordings` removes it (via `voice.orgs_with_due_recordings`) and keeps a tombstone row. `GET /internal/v1/calls/{id}/recording` streams the file (shared secret plus `X-Organization-Id`). `PHONE_HASH_KEY` makes the event's `prospectPhoneHash`. Limits: no outbox for the enqueue, no consumer dedupe, no event if the recording callback never arrives.
 - `src/modules/webhook/` receives Twilio status and recording callbacks (unauthenticated, verified by
   `X-Twilio-Signature` over `WEBHOOK_BASE_URL` + path; bad signature is 403 and changes nothing;

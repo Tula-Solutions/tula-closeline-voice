@@ -170,7 +170,8 @@ describe('a warm Handoff', () => {
       'I need pricing for ten seats.',
       'Ten seats on the Team plan is 400 dollars.',
     ])
-    expect(t.copilot.streams.has(callId)).toBe(true)
+    // The tracks are forked to the media route; the streams open when Twilio connects there.
+    expect(operations).toContain('forkTracks')
   })
 
   test('stores the timing: requested, answered, completed', async () => {

@@ -24,8 +24,10 @@ export type LineListQuery = {
   cursor?: LineCursor
   limit: number
   state?: LineState
-  /** Only the Lines assigned to this Rep's Membership. */
-  assignedToRep?: string
+  /** Only the Lines with exactly this assignment. */
+  assignedTo?: LineAssignment
+  /** Oldest first instead of newest first (the order a Call picks its Line in). */
+  oldestFirst?: boolean
 }
 
 /** Thrown by {@link LineStore.insert} when the number is live in some Organization already. */

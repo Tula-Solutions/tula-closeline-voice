@@ -13,7 +13,7 @@ type LineBody = {
   country: string
   label: string | null
   state: string
-  assignment: { kind: string; teamId?: string; membershipId?: string }
+  assignment: { kind: string; teamId?: string; membershipId?: string; role?: string }
   createdAt: string
   releasedAt: string | null
 }
@@ -72,12 +72,13 @@ describe('adding a Line', () => {
     expect(codeOf(second.body)).toBe('line.number_unavailable')
   })
 
-  it('gives a bought number back when the Line cannot be saved', async () => {
+  it('never releases a number another live Line holds when a port of it is refused', async () => {
     await t.call(admin, 'POST', '/lines', { method: 'port', number: '+14155550100' })
     const before = t.deps.numbers.released.length
-    await t.call(admin, 'POST', '/lines', { method: 'port', number: '+14155550100' })
-    // A port that loses the race is released at the provider so no number is left paid for.
-    expect(t.deps.numbers.released.length).toBe(before + 1)
+    const second = await t.call(admin, 'POST', '/lines', { method: 'port', number: '+14155550100' })
+    expect(codeOf(second.body)).toBe('line.number_unavailable')
+    // Releasing it would cut the live Line off at the provider (its webhook is cleared).
+    expect(t.deps.numbers.released.length).toBe(before)
   })
 
   it('answers server.unavailable (503) when the provisioner outlives its deadline', async () => {
@@ -276,11 +277,40 @@ describe('assigning a Line', () => {
     expect(codeOf(body)).toBe('line.assignment_invalid')
   })
 
-  it('answers line.assignment_invalid (422) for a member who is not a Rep', async () => {
+  it('answers line.assignment_invalid (422) for a Membership that is not in the Organization', async () => {
     const line = (await buy(admin)).body as LineBody
     const { status, body } = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
       kind: 'rep',
       membershipId: `mem_${crypto.randomUUID().replaceAll('-', '')}`,
+    })
+    expect(status).toBe(422)
+    expect(codeOf(body)).toBe('line.assignment_invalid')
+  })
+
+  it('assigns a Line to an Admin or Owner Membership and to a whole role', async () => {
+    const line = (await buy(admin)).body as LineBody
+    const membershipId = `mem_${crypto.randomUUID().replaceAll('-', '')}`
+    t.deps.directory.addMember(admin.organizationId, membershipId, 'owner')
+    const own = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
+      kind: 'rep',
+      membershipId,
+    })
+    expect(own.status).toBe(200)
+    const role = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
+      kind: 'role',
+      role: 'admin',
+    })
+    expect(role.status).toBe(200)
+    expect((role.body as LineBody).assignment).toEqual({ kind: 'role', role: 'admin' })
+  })
+
+  it('refuses a Membership of another Organization', async () => {
+    const line = (await buy(admin)).body as LineBody
+    const membershipId = `mem_${crypto.randomUUID().replaceAll('-', '')}`
+    t.deps.directory.addMember(newOrganizationId(), membershipId, 'admin')
+    const { status, body } = await t.call(admin, 'PUT', `/lines/${line.id}/assignment`, {
+      kind: 'rep',
+      membershipId,
     })
     expect(status).toBe(422)
     expect(codeOf(body)).toBe('line.assignment_invalid')
@@ -376,11 +406,13 @@ describe('releasing a Line', () => {
   })
 
   it('logs a failed give-back through describeError, with the stack frames and a name', async () => {
-    await t.call(admin, 'POST', '/lines', { method: 'port', number: '+14155550100' })
+    t.deps.lines.insert = async () => {
+      throw new Error('database down')
+    }
     t.deps.numbers.release = async () => {
       throw new Error('SECRET-VENDOR-BODY')
     }
-    await t.call(admin, 'POST', '/lines', { method: 'port', number: '+14155550100' })
+    await buy(admin)
     const logged = t.deps.logLines.find((line) => line.includes('line.add.release_failed')) ?? ''
     expect(logged).toContain('"stack"')
     expect(logged).toContain('"name":"Error"')

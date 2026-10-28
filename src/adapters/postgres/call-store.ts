@@ -61,6 +61,8 @@ function toStored(row: Row): StoredCall {
     ...call,
     providerCallSid: row.providerCallSid,
     agentCostMicroCents: Number(row.agentCostMicroCents),
+    copilot: row.copilot,
+    transcriptUnavailable: row.transcriptUnavailable,
   }
 }
 
@@ -106,6 +108,7 @@ export function createPostgresCallStore(db: Database): CallStore {
             repMembershipId: call.repMembershipId,
             prospectId: call.prospectId,
             prospectNumber: call.prospectNumber,
+            copilot: call.copilot ?? false,
             idempotencyKey: call.idempotency?.key ?? null,
             requestFingerprint: call.idempotency?.fingerprint ?? null,
             createdAt: call.createdAt,
@@ -276,6 +279,54 @@ export function createPostgresCallStore(db: Database): CallStore {
       })
     },
 
+    async organizationsWithStaleOutbound(before, after, limit) {
+      const result = await db.execute<{ organization_id: string }>(
+        sql`select organization_id from voice.orgs_with_stale_outbound(${before.toISOString()}::timestamptz, ${after}::text, ${limit}::int)`
+      )
+      return result.rows.map((row: { organization_id: string }) => row.organization_id)
+    },
+
+    async failStaleOutbound(organizationId, before, at, limit) {
+      return withOrganization(db, organizationId, async (tx) => {
+        const stale = and(
+          eq(voiceCalls.organizationId, organizationId),
+          eq(voiceCalls.direction, 'outbound'),
+          inArray(voiceCalls.state, ['ringing', 'connecting']),
+          lt(voiceCalls.createdAt, before)
+        )
+        // The old state decides the reason, so read it with the lock before the update.
+        const candidates = await tx
+          .select({ id: voiceCalls.id, state: voiceCalls.state })
+          .from(voiceCalls)
+          .where(stale)
+          .limit(limit)
+          .for('update', { skipLocked: true })
+        const failed: Row[] = []
+        for (const candidate of candidates) {
+          const [row] = await tx
+            .update(voiceCalls)
+            .set({
+              state: 'failed',
+              failureReason: candidate.state === 'ringing' ? 'no_answer' : 'provider_error',
+              endedAt: at,
+              updatedAt: sql`now()`,
+            })
+            .where(and(one(organizationId, candidate.id), eq(voiceCalls.state, candidate.state)))
+            .returning()
+          if (row !== undefined) {
+            await log(tx, organizationId, row.id, {
+              kind: 'state_changed',
+              fromState: candidate.state,
+              toState: 'failed',
+              occurredAt: at,
+            })
+            failed.push(row)
+          }
+        }
+        return failed.map(toStored)
+      })
+    },
+
     async get(organizationId, id) {
       const [row] = await withOrganization(db, organizationId, (tx) =>
         tx.select().from(voiceCalls).where(one(organizationId, id)).limit(1)
@@ -323,6 +374,15 @@ export function createPostgresCallStore(db: Database): CallStore {
         tx
           .update(voiceCalls)
           .set({ providerCallSid, updatedAt: sql`now()` })
+          .where(one(organizationId, id))
+      )
+    },
+
+    async markTranscriptUnavailable(organizationId, id, reason) {
+      await withOrganization(db, organizationId, (tx) =>
+        tx
+          .update(voiceCalls)
+          .set({ transcriptUnavailable: reason, updatedAt: sql`now()` })
           .where(one(organizationId, id))
       )
     },

@@ -180,6 +180,8 @@ async function buyAndRecord(
     return toLine(stored)
   } catch (error) {
     if (error instanceof NumberTakenError) {
+      // Another live Line holds this number: giving it back would cut that Line off at the provider.
+      held.providerSid = null
       throw domainError(VOICE_ERRORS['line.number_unavailable'])
     }
     throw error
@@ -228,9 +230,10 @@ export async function add(
 const sameAssignment = (a: LineAssignment, b: LineAssignment): boolean =>
   a.kind === b.kind &&
   (a.kind !== 'team' || (b.kind === 'team' && a.teamId === b.teamId)) &&
-  (a.kind !== 'rep' || (b.kind === 'rep' && a.membershipId === b.membershipId))
+  (a.kind !== 'rep' || (b.kind === 'rep' && a.membershipId === b.membershipId)) &&
+  (a.kind !== 'role' || (b.kind === 'role' && a.role === b.role))
 
-/** Sets who inbound Calls on a Line ring: a Team, one Rep, or nobody. */
+/** Sets who inbound Calls on a Line ring: a Team, one member of any role, a whole role, or nobody. */
 export async function assign(
   deps: LineDeps,
   caller: Caller,
@@ -247,9 +250,10 @@ export async function assign(
   }
   const valid =
     assignment.kind === 'unassigned' ||
+    assignment.kind === 'role' ||
     (assignment.kind === 'team'
       ? await deps.directory.teamExists(caller.organizationId, assignment.teamId)
-      : await deps.directory.isRep(caller.organizationId, assignment.membershipId))
+      : await deps.directory.isMember(caller.organizationId, assignment.membershipId))
   if (!valid) {
     throw domainError(VOICE_ERRORS['line.assignment_invalid'])
   }

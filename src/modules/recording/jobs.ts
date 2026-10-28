@@ -57,6 +57,13 @@ export function publishOnFinal<T extends CallStore>(
       await enqueue(organizationId, call)
       return call
     },
+    failStaleOutbound: async (organizationId, before, at, limit) => {
+      const failed = await calls.failStaleOutbound(organizationId, before, at, limit)
+      for (const call of failed) {
+        await enqueue(organizationId, call)
+      }
+      return failed
+    },
     missStaleRinging: async (organizationId, before, at, limit) => {
       const missed = await calls.missStaleRinging(organizationId, before, at, limit)
       for (const call of missed) {

@@ -3,7 +3,6 @@ import type { StreamingTranscribePort, TelephonyPort } from 'tula-closeline-kit'
 import { AppError, CONTACT_UNAVAILABLE, type ContactGuard } from 'tula-closeline-kit'
 import { BookingFailedError, type BookingGateway } from '~/ports/booking-gateway'
 import type { EvidenceSearch } from '~/ports/evidence-search'
-import type { NumberProvisioner } from '~/ports/number-provisioner'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 import type { ProspectDirectory } from '~/ports/prospect-directory'
 
@@ -14,20 +13,14 @@ const unavailable = (): AppError =>
     message: ERRORS['server.unavailable'].message,
   })
 
-/** A provisioner for a deployment with no telephony provider wired: every call fails closed. */
-export function createUnconfiguredNumberProvisioner(): NumberProvisioner {
-  return {
-    buy: async () => Promise.reject(unavailable()),
-    port: async () => Promise.reject(unavailable()),
-    release: async () => Promise.reject(unavailable()),
-  }
-}
-
 /** A directory for a deployment with no link to the core service: every call fails closed. */
 export function createUnconfiguredOrganizationDirectory(): OrganizationDirectory {
   return {
     teamExists: async () => Promise.reject(unavailable()),
     isRep: async () => Promise.reject(unavailable()),
+    isMember: async () => Promise.reject(unavailable()),
+    roleMembers: async () => Promise.reject(unavailable()),
+    teamsOf: async () => Promise.reject(unavailable()),
     membershipOf: async () => Promise.reject(unavailable()),
     teamRepsOf: async () => Promise.reject(unavailable()),
     onlineRepsOfTeam: async () => Promise.reject(unavailable()),

@@ -8,6 +8,7 @@ import {
   createTestApp,
   identityOf,
   newOrganizationId,
+  reportStatus,
   type TestApp,
   type TestIdentity,
 } from '~/testing'
@@ -51,8 +52,19 @@ async function place(body: Record<string, unknown>) {
     body: JSON.stringify(body),
   })
   const parsed = (await response.json()) as { call?: CallBody }
-  return { status: response.status, call: parsed.call }
+  // The Prospect picks up; the Disclosure, bridge and Transcript follow from that report.
+  if (parsed.call) {
+    await reportStatus(t, telephony, org, parsed.call.id, 'in-progress')
+  }
+  const call = parsed.call && ((await t.deps.calls.get(org, parsed.call.id as never)) as CallBody)
+  return { status: response.status, call: call || parsed.call }
 }
+
+/** What the media socket does when the provider connects: opens the streams of the Call. */
+const connect = (callId: string) => Transcript.attach(t.deps, org, callId as never)
+
+const unavailable = async (callId: string) =>
+  (await t.deps.calls.get(org, callId as never))?.transcriptUnavailable
 
 /** Sends enough audio on a track for every scripted turn to be heard. */
 function speak(callId: string, track: 'rep' | 'prospect') {
@@ -62,17 +74,16 @@ function speak(callId: string, track: 'rep' | 'prospect') {
 type Script = Partial<Record<'rep' | 'prospect', { text: string; afterBytes: number }[]>>
 
 /**
- * Places a Copilot Call, then restarts its streams with `scripts` in place: the memory speech
+ * Places a Copilot Call, then connects its media socket with `scripts` in place: the memory speech
  * adapter reads a script when a stream opens, and the Call's id is only known after the place.
  */
 async function placeScripted(scripts: Script) {
   const { call } = await place({ to: PROSPECT, copilot: true })
   const id = call?.id as string
-  await Transcript.stop(t.deps, id)
   for (const track of ['rep', 'prospect'] as const) {
     t.deps.transcribe.script(org, id as never, track, scripts[track] ?? [])
   }
-  expect(await Transcript.start(t.deps, org, id as never)).toBe(true)
+  expect(await connect(id)).toBe(true)
   return id
 }
 
@@ -82,13 +93,17 @@ const heard = async (callId: string) =>
   )
 
 describe('the live Transcript of a Copilot Call', () => {
-  it('plays the Copilot Disclosure and opens one stream per track', async () => {
+  it('plays the Copilot Disclosure, forks the tracks, and opens one stream per track on connect', async () => {
     const { status, call } = await place({ to: PROSPECT, copilot: true })
     expect(status).toBe(201)
     expect(call?.state).toBe('live')
     const stored = await t.deps.calls.get(org, call?.id as never)
     expect(stored?.disclosure.wordingVersion).toBe(Calls.COPILOT_DISCLOSURE_WORDING.version)
     expect(stored?.disclosure.aiAssisted).toBe(true)
+    expect(telephony.calls().find((c) => c.callId === call?.id)?.streamId).not.toBeNull()
+    // The streams open when the provider's socket connects, not before.
+    expect(t.deps.transcribe.streams()).toEqual([])
+    expect(await connect(call?.id as string)).toBe(true)
     expect(t.deps.transcribe.streams().map((s) => s.track)).toEqual(['rep', 'prospect'])
   })
 
@@ -97,12 +112,15 @@ describe('the live Transcript of a Copilot Call', () => {
     expect(call?.state).toBe('live')
     expect(t.deps.transcribe.streams()).toEqual([])
     expect(await Transcript.start(t.deps, org, call?.id as never)).toBe(false)
+    expect(await connect(call?.id as string)).toBe(false)
+    expect(t.deps.transcribe.streams()).toEqual([])
   })
 
   it('opens nothing and saves no turn when the Disclosure failed', async () => {
     telephony.failNext('playDisclosure', TELEPHONY_ERROR_CODES.unavailable)
-    const { status } = await place({ to: PROSPECT, copilot: true })
-    expect(status).toBe(502)
+    const { status, call } = await place({ to: PROSPECT, copilot: true })
+    expect(status).toBe(201)
+    expect(call?.state).toBe('failed')
     expect(t.deps.transcribe.streams()).toEqual([])
     expect(telephony.calls().length).toBeGreaterThan(0)
   })
@@ -125,6 +143,7 @@ describe('the live Transcript of a Copilot Call', () => {
     await t.deps.calls.transition(org, id, { to: 'disclosing', at: new Date() })
     const before = t.deps.transcribe.streams().length
     expect(await Transcript.start(t.deps, org, id as never)).toBe(false)
+    expect(await connect(id)).toBe(false)
     expect(t.deps.transcribe.streams()).toHaveLength(before)
     expect(await heard(id)).toEqual([])
   })
@@ -148,10 +167,19 @@ describe('the live Transcript of a Copilot Call', () => {
     expect(turns.filter((x) => x.track === 'rep').map((x) => x.text)).toEqual(['happy to help'])
   })
 
-  it('starting twice opens only two streams', async () => {
+  it('connecting twice opens only two streams', async () => {
     const { call } = await place({ to: PROSPECT, copilot: true })
+    expect(await connect(call?.id as string)).toBe(true)
+    expect(await connect(call?.id as string)).toBe(false)
     expect(await Transcript.start(t.deps, org, call?.id as never)).toBe(true)
     expect(t.deps.transcribe.streams()).toHaveLength(2)
+  })
+
+  it('a failed fork marks the Transcript unavailable and leaves the Call live', async () => {
+    telephony.failNext('forkTracks', TELEPHONY_ERROR_CODES.unavailable)
+    const { call } = await place({ to: PROSPECT, copilot: true })
+    expect(call?.state).toBe('live')
+    expect(await unavailable(call?.id as string)).toBe('speech_to_text_failed')
   })
 
   it('resumes after a pipeline restart without duplicate turns', async () => {
@@ -161,7 +189,7 @@ describe('the live Transcript of a Copilot Call', () => {
     await Transcript.stop(t.deps, id)
     t.deps.transcribe.script(org, id as never, 'prospect', [{ text: 'second', afterBytes: 100 }])
     t.deps.transcribe.script(org, id as never, 'rep', [])
-    expect(await Transcript.start(t.deps, org, id as never)).toBe(true)
+    expect(await connect(id)).toBe(true)
     speak(id, 'prospect')
     await Transcript.settled(t.deps, id)
     expect(await heard(id)).toEqual(['prospect:first', 'prospect:second'])
@@ -185,7 +213,8 @@ describe('the live Transcript of a Copilot Call', () => {
     const { status, call } = await place({ to: PROSPECT, copilot: true })
     expect(status).toBe(201)
     expect(call?.state).toBe('live')
-    expect(t.deps.copilot.unavailable.get(call?.id as never)).toBe('speech_to_text_failed')
+    expect(await connect(call?.id as string)).toBe(false)
+    expect(await unavailable(call?.id as string)).toBe('speech_to_text_failed')
     expect((await t.deps.calls.get(org, call?.id as never))?.state).toBe('live')
   })
 
@@ -194,7 +223,7 @@ describe('the live Transcript of a Copilot Call', () => {
     t.deps.transcribe.failReconnects(10)
     const stream = t.deps.transcribe.streams().findLast((s) => s.track === 'prospect')
     await t.deps.transcribe.dropConnection(stream?.streamId as string)
-    expect(t.deps.copilot.unavailable.get(id as never)).toBe('stream_dropped')
+    expect(await unavailable(id)).toBe('stream_dropped')
     expect((await t.deps.calls.get(org, id as never))?.state).toBe('live')
   })
 })
@@ -266,9 +295,31 @@ describe('GET /v1/calls/{callId}/copilot/stream', () => {
   it('announces transcript.unavailable when speech-to-text failed', async () => {
     t.deps.transcribe.failNextOpen('streaming_transcribe.rejected', 2)
     const { call } = await place({ to: PROSPECT, copilot: true })
+    await connect(call?.id as string)
     const response = await open(rep, call?.id as string)
     const seen = await frames(response, (s) => s.some((f) => f.includes('transcript.unavailable')))
     expect(seen.some((f) => f.includes('transcript.unavailable'))).toBe(true)
+  })
+
+  it('ends after its lifetime so the client reconnects, and resumes where it stopped', async () => {
+    const id = await placeScripted({ prospect: [{ text: 'before', afterBytes: 100 }] })
+    t.deps.copilot.maxStreamMs = 60
+    speak(id, 'prospect')
+    await Transcript.settled(t.deps, id)
+    const first = await frames(await open(rep, id), () => false)
+    expect(first.filter((f) => f.includes('transcript.turn'))).toHaveLength(1)
+    const again = await frames(await open(rep, id, 'r0.p1'), () => false)
+    expect(again.filter((f) => f.includes('transcript.turn'))).toHaveLength(0)
+  })
+
+  it('shows an unavailable Transcript that another instance recorded', async () => {
+    const { call } = await place({ to: PROSPECT, copilot: true })
+    // The flag lives on the Call, so this instance never saw the failure itself.
+    await t.deps.calls.markTranscriptUnavailable(org, call?.id as never, 'stream_dropped')
+    const seen = await frames(await open(rep, call?.id as string), (s) =>
+      s.some((f) => f.includes('transcript.unavailable'))
+    )
+    expect(seen.some((f) => f.includes('"reason":"stream_dropped"'))).toBe(true)
   })
 
   it('does not exist for another Organization', async () => {

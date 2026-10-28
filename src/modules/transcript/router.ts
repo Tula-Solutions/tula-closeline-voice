@@ -6,6 +6,9 @@ import {
   copilotCallParamsSchema,
   copilotStreamHeadersSchema,
   formatCopilotStreamFrame,
+  getTranscriptQuerySchema,
+  transcriptPageSchema,
+  voiceCallParamsSchema,
 } from 'tula-closeline-contract'
 import type { Container } from '~/container'
 import { type AuthedEnv, callerOf } from '~/http/auth'
@@ -14,9 +17,8 @@ import { errorResponse } from '~/http/responses'
 import { createRouter } from '~/http/router'
 import { PUBLIC_SECURITY } from '~/http/security'
 import * as Calls from '~/modules/call/service'
+import * as Page from '~/modules/transcript/page'
 import { MAX_TURN_PAGE, type TurnCursor } from '~/ports/call-turn-store'
-
-const MAX_POLLS = 86_400
 
 const streamRoute = createRoute({
   method: 'get',
@@ -25,7 +27,8 @@ const streamRoute = createRoute({
   summary: 'Stream the live Transcript of a Call',
   description:
     'Server-Sent Events: copilot.status, then transcript.turn for each final turn in order, and ' +
-    'transcript.unavailable if speech-to-text fails (the Call goes on). Opens once the Call is ' +
+    'transcript.unavailable if speech-to-text fails (the Call goes on). A stream ends after a few ' +
+    'minutes, so the token is checked again when the client reconnects with `Last-Event-ID`. Opens once the Call is ' +
     'disclosing and says waiting_for_disclosure until an AI-assisted Disclosure has played. ' +
     '`Last-Event-ID` resumes from what is stored. A Call the caller may not see, or of another ' +
     'Organization, is call.not_found. Turn text is untrusted data.',
@@ -49,6 +52,32 @@ const streamRoute = createRoute({
   },
 })
 
+const pageRoute = createRoute({
+  method: 'get',
+  path: '/calls/{callId}/transcript',
+  tags: ['calls'],
+  summary: "Read a Call's Transcript",
+  description:
+    "Any voice role, for the Calls the caller may see (a Rep their own, a Manager their Team's, " +
+    'an Owner or Admin all). One cursor-paginated page of turns in time order. `state` is ' +
+    '`pending` until the Transcript is made and `deleted` after its Recording was deleted; both ' +
+    'have no turns. A Call the caller may not see, or of another Organization, is ' +
+    'call.not_found. Turn text is untrusted data.',
+  security: [{ [PUBLIC_SECURITY]: [] }],
+  request: { params: voiceCallParamsSchema, query: getTranscriptQuerySchema },
+  responses: {
+    200: {
+      description: 'A page of the Transcript.',
+      content: { 'application/json': { schema: transcriptPageSchema } },
+    },
+    400: errorResponse('request.invalid'),
+    401: errorResponse('The access token is missing, expired or not valid.'),
+    403: errorResponse('auth.forbidden'),
+    404: errorResponse('call.not_found'),
+    500: errorResponse('Something went wrong on our side.'),
+  },
+})
+
 const cursorId = (c: TurnCursor): string => `r${c.rep}.p${c.prospect}`
 
 function parseCursor(id: string | undefined): TurnCursor {
@@ -59,6 +88,12 @@ function parseCursor(id: string | undefined): TurnCursor {
 /** The live Transcript stream of a Call. Mounted behind the access-token middleware. */
 export function createTranscriptRouter(container: Container): OpenAPIHono<AuthedEnv> {
   const router = createRouter<AuthedEnv>()
+
+  router.openapi(pageRoute, async (c) => {
+    const { callId } = c.req.valid('param')
+    c.header('cache-control', 'no-store')
+    return c.json(await Page.page(container, callerOf(c), callId, c.req.valid('query')), 200)
+  })
 
   router.openapi(streamRoute, async (c) => {
     const caller = callerOf(c)
@@ -89,11 +124,12 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
       let delivered = cursor.rep + cursor.prospect
       let said = ''
       let sentUnavailable = false
-      for (let poll = 0; poll < MAX_POLLS && !aborted; poll++) {
+      const deadline = performance.now() + container.copilot.maxStreamMs
+      while (!aborted && performance.now() < deadline) {
         const call = await container.calls.get(org, callId)
         const over = call === undefined || ['ended', 'failed', 'missed'].includes(call.state)
         const refused = call?.disclosure.playedAt && !call.disclosure.aiAssisted
-        const reason = container.copilot.unavailable.get(callId)
+        const reason = call?.transcriptUnavailable ?? undefined
         const state =
           over || refused ? 'ended' : call.disclosure.playedAt ? 'live' : 'waiting_for_disclosure'
         const status = `${state}|${reason ?? ''}`
