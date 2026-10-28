@@ -2,8 +2,9 @@ import type { OrganizationId, VoiceCall } from 'tula-closeline-contract'
 import type { StreamEvent, TranscribeStream, TurnEvent } from 'tula-closeline-kit'
 import type { Container } from '~/container'
 import type { Env } from '~/env'
+import type { TranscriptUnavailableReason } from '~/ports/call-store'
 import type { TurnTrack } from '~/ports/call-turn-store'
-import { markUnavailable, type OpenTranscript } from './runtime'
+import type { OpenTranscript } from './runtime'
 
 /** What the live Transcript needs from the container. */
 export type TranscriptDeps = Pick<
@@ -15,10 +16,17 @@ const TRACKS: readonly TurnTrack[] = ['rep', 'prospect']
 const MAX_TURN_TEXT = 4_000
 const MAX_CALL_MS = 43_200_000
 
-/** Where the provider streams a Call's two tracks: this service's media route, never user input. */
-function mediaUrl(env: Env, callId: string): string {
-  const base = env.WEBHOOK_BASE_URL ?? `http://127.0.0.1:${env.PORT}`
-  return `${base.replace(/\/$/, '').replace(/^http/, 'ws')}/media/${callId}`
+/**
+ * Where the provider streams a Call's two tracks: this service's media route, never user input.
+ * The Organization rides in the path (Twilio drops a query on a Stream URL) because the route is signed by the provider and has no token.
+ */
+export function mediaUrl(env: Env, callId: string, organizationId: string): string {
+  return `${mediaBase(env).replace(/^http/, 'ws')}/media/${organizationId}/${callId}`
+}
+
+/** The origin the provider reaches this service on, without a trailing slash. */
+export function mediaBase(env: Env): string {
+  return (env.WEBHOOK_BASE_URL ?? `http://127.0.0.1:${env.PORT}`).replace(/\/$/, '')
 }
 
 const clamp = (ms: number): number => Math.min(Math.max(Math.round(ms), 0), MAX_CALL_MS)
@@ -28,21 +36,8 @@ async function closeAll(open: OpenTranscript): Promise<void> {
   await Promise.allSettled(Object.values(open.streams).map((stream) => stream.close()))
 }
 
-/**
- * Starts the live Transcript of a Rep's Call: forks its two tracks and opens one speech-to-text
- * stream for each. Nothing opens unless the Call is disclosing or live and its stored Disclosure
- * has played and said an AI assists; there is no setting for that (ADR 0003). Idempotent: a Call
- * whose streams are open is left as it is. A failure never touches the Call: the Transcript is
- * marked unavailable and `false` returned.
- */
-export async function start(
-  deps: TranscriptDeps,
-  organizationId: string,
-  callId: VoiceCall['id']
-): Promise<boolean> {
-  if (deps.copilot.streams.has(callId)) {
-    return true
-  }
+/** The Call, when its Transcript may run: Copilot Disclosure played, Call disclosing or live. */
+async function eligible(deps: TranscriptDeps, organizationId: string, callId: VoiceCall['id']) {
   const call = await deps.calls.get(organizationId, callId)
   const playedAt = call?.disclosure.playedAt
   if (
@@ -54,21 +49,88 @@ export async function start(
     playedAt === undefined ||
     (call.state !== 'disclosing' && call.state !== 'live')
   ) {
+    return undefined
+  }
+  return { ...call, providerCallSid: call.providerCallSid, playedAt }
+}
+
+/** Records on the Call that its Transcript stopped; a failed write is logged, never thrown. */
+export async function markUnavailable(
+  deps: Pick<TranscriptDeps, 'calls' | 'logger'>,
+  organizationId: string,
+  callId: string,
+  reason: TranscriptUnavailableReason
+): Promise<void> {
+  await deps.calls
+    .markTranscriptUnavailable(organizationId, callId as VoiceCall['id'], reason)
+    .catch((error: unknown) =>
+      deps.logger.warn('transcript.mark_failed', {
+        callId,
+        code: (error as { code?: unknown }).code,
+      })
+    )
+}
+
+/**
+ * Starts the live Transcript of a Rep's Call: forks its two tracks to the media route, where
+ * {@link attach} opens the speech-to-text streams once the provider connects. Nothing starts
+ * unless the Call is disclosing or live and its stored Disclosure has played and said an AI
+ * assists; there is no setting for that (ADR 0003). Idempotent: forking an already forked Call
+ * returns the same fork. A failure never touches the Call: the Transcript is marked unavailable
+ * and `false` returned.
+ */
+export async function start(
+  deps: TranscriptDeps,
+  organizationId: string,
+  callId: VoiceCall['id']
+): Promise<boolean> {
+  const call = await eligible(deps, organizationId, callId)
+  if (call === undefined) {
+    return false
+  }
+  try {
+    await deps.telephony.forkTracks({
+      organizationId: organizationId as OrganizationId,
+      providerCallId: call.providerCallSid,
+      destinationUrl: mediaUrl(deps.env, callId, organizationId),
+    })
+    return true
+  } catch (error) {
+    await markUnavailable(deps, organizationId, callId, 'speech_to_text_failed')
+    deps.logger.warn('transcript.start_failed', {
+      callId,
+      code: (error as { code?: unknown }).code,
+    })
+    return false
+  }
+}
+
+/**
+ * Opens one speech-to-text stream per track for a Call whose media socket just connected on this
+ * instance. Checks the Call again, so a socket for a Call without the Copilot or an unplayed
+ * Disclosure gets nothing. Returns false when it refuses, or when this instance already has the
+ * Call's streams open. A failure marks the Transcript unavailable and returns false.
+ */
+export async function attach(
+  deps: TranscriptDeps,
+  organizationId: string,
+  callId: VoiceCall['id']
+): Promise<boolean> {
+  if (deps.copilot.streams.has(callId)) {
+    return false
+  }
+  const call = await eligible(deps, organizationId, callId)
+  if (call === undefined || deps.copilot.streams.has(callId)) {
     return false
   }
   const org = organizationId as OrganizationId
   const open: OpenTranscript = { streams: {}, saving: {} }
-  // Claimed before any await, so a second start for this Call does nothing.
+  // Claimed before the next await, so a second attach for this Call does nothing.
   deps.copilot.streams.set(callId, open)
   try {
-    await deps.telephony.forkTracks({
-      organizationId: org,
-      providerCallId: call.providerCallSid,
-      destinationUrl: mediaUrl(deps.env, callId),
-    })
     for (const track of TRACKS) {
       // Word times count from the stream's first audio; this puts them on the Call's clock.
-      const base = clamp(deps.clock.now().getTime() - Date.parse(playedAt))
+      const base = clamp(deps.clock.now().getTime() - Date.parse(call.playedAt))
       let lastSaved = 0
       open.streams[track] = await deps.transcribe.open({
         organizationId: org,
@@ -78,8 +140,9 @@ export async function start(
         sampleRate: 8000,
         onEvent: (event: StreamEvent) => {
           if (event.type === 'failed') {
-            markUnavailable(
-              deps.copilot,
+            void markUnavailable(
+              deps,
+              organizationId,
               callId,
               event.code === 'streaming_transcribe.unavailable'
                 ? 'stream_dropped'
@@ -103,8 +166,8 @@ export async function start(
   } catch (error) {
     await closeAll(open)
     deps.copilot.streams.delete(callId)
-    markUnavailable(deps.copilot, callId, 'speech_to_text_failed')
-    deps.logger.warn('transcript.start_failed', {
+    await markUnavailable(deps, organizationId, callId, 'speech_to_text_failed')
+    deps.logger.warn('transcript.attach_failed', {
       callId,
       code: (error as { code?: unknown }).code,
     })
@@ -151,6 +214,11 @@ export function pushAudio(
   } catch {
     // The stream closed or failed between the lookup and the send; its own event says so.
   }
+}
+
+/** Whether this instance has the Call's speech-to-text streams open. */
+export function isOpen(deps: Pick<TranscriptDeps, 'copilot'>, callId: string): boolean {
+  return deps.copilot.streams.has(callId)
 }
 
 /** Waits for the turns already heard on a Call to be stored. */

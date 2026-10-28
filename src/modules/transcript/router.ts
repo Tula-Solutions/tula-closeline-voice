@@ -16,8 +16,6 @@ import { PUBLIC_SECURITY } from '~/http/security'
 import * as Calls from '~/modules/call/service'
 import { MAX_TURN_PAGE, type TurnCursor } from '~/ports/call-turn-store'
 
-const MAX_POLLS = 86_400
-
 const streamRoute = createRoute({
   method: 'get',
   path: '/calls/{callId}/copilot/stream',
@@ -25,7 +23,8 @@ const streamRoute = createRoute({
   summary: 'Stream the live Transcript of a Call',
   description:
     'Server-Sent Events: copilot.status, then transcript.turn for each final turn in order, and ' +
-    'transcript.unavailable if speech-to-text fails (the Call goes on). Opens once the Call is ' +
+    'transcript.unavailable if speech-to-text fails (the Call goes on). A stream ends after a few ' +
+    'minutes, so the token is checked again when the client reconnects with `Last-Event-ID`. Opens once the Call is ' +
     'disclosing and says waiting_for_disclosure until an AI-assisted Disclosure has played. ' +
     '`Last-Event-ID` resumes from what is stored. A Call the caller may not see, or of another ' +
     'Organization, is call.not_found. Turn text is untrusted data.',
@@ -89,11 +88,12 @@ export function createTranscriptRouter(container: Container): OpenAPIHono<Authed
       let delivered = cursor.rep + cursor.prospect
       let said = ''
       let sentUnavailable = false
-      for (let poll = 0; poll < MAX_POLLS && !aborted; poll++) {
+      const deadline = performance.now() + container.copilot.maxStreamMs
+      while (!aborted && performance.now() < deadline) {
         const call = await container.calls.get(org, callId)
         const over = call === undefined || ['ended', 'failed', 'missed'].includes(call.state)
         const refused = call?.disclosure.playedAt && !call.disclosure.aiAssisted
-        const reason = container.copilot.unavailable.get(callId)
+        const reason = call?.transcriptUnavailable ?? undefined
         const state =
           over || refused ? 'ended' : call.disclosure.playedAt ? 'live' : 'waiting_for_disclosure'
         const status = `${state}|${reason ?? ''}`

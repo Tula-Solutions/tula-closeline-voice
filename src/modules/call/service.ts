@@ -509,6 +509,7 @@ export async function place(
       providerCallSid: null,
       agentCostMicroCents: 0,
       copilot: request.copilot ?? false,
+      transcriptUnavailable: null,
     },
     line.number,
     to
