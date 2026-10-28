@@ -33,6 +33,7 @@ import {
 import { createCoreHttpBookingGateway } from '~/adapters/core-http/booking-gateway'
 import { createCoreHttpOrganizationDirectory } from '~/adapters/core-http/organization-directory'
 import { createMemoryBookingGateway } from '~/adapters/memory/booking-gateway'
+import { createMemoryChatSites, createMemoryConsentRecorder } from '~/adapters/memory/chat-sites'
 import { createMemoryEvidenceSearch } from '~/adapters/memory/evidence-search'
 import { createRunningMemoryNumberProvisioner } from '~/adapters/memory/number-provisioner'
 import { createMemoryOrganizationDirectory } from '~/adapters/memory/organization-directory'
@@ -42,6 +43,7 @@ import { createPostgresAgentTurnStore } from '~/adapters/postgres/agent-turn-sto
 import { createPostgresCallEventStore } from '~/adapters/postgres/call-event-store'
 import { createPostgresCallStore } from '~/adapters/postgres/call-store'
 import { createPostgresCallTurnStore } from '~/adapters/postgres/call-turn-store'
+import { createPostgresChatStore } from '~/adapters/postgres/chat-store'
 import { createPostgresHandoffStore } from '~/adapters/postgres/handoff-store'
 import { createPostgresIdempotencyStore } from '~/adapters/postgres/idempotency-store'
 import { createPostgresLineStore } from '~/adapters/postgres/line-store'
@@ -53,6 +55,8 @@ import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
 import { createTwilioNumberProvisioner } from '~/adapters/twilio/number-provisioner'
 import {
   createUnconfiguredBookingGateway,
+  createUnconfiguredChatSites,
+  createUnconfiguredConsentRecorder,
   createUnconfiguredEvidenceSearch,
   createUnconfiguredOrganizationDirectory,
   createUnconfiguredStreamingTranscribe,
@@ -74,6 +78,8 @@ import type { BookingGateway } from '~/ports/booking-gateway'
 import type { CallEventStore } from '~/ports/call-event-store'
 import type { CallStore } from '~/ports/call-store'
 import type { CallTurnStore } from '~/ports/call-turn-store'
+import type { ChatSites, ConsentRecorder } from '~/ports/chat-sites'
+import type { ChatStore } from '~/ports/chat-store'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { HandoffStore } from '~/ports/handoff-store'
 import type { IdempotencyStore } from '~/ports/idempotency-store'
@@ -118,6 +124,12 @@ export type Container = {
   questions: QualificationQuestionStore
   /** The turns of Inbound Agent conversations, with the sources each Agent turn cites. */
   turns: AgentTurnStore
+  /** The website Chats of every Organization. */
+  chats: ChatStore
+  /** What a publishable key stands for: its Organization, allowed origins and consent wording. */
+  chatSites: ChatSites
+  /** Records a Chat visitor's Prospect and Contact Consent in core. */
+  consents: ConsentRecorder
   /** The warm Handoffs of Agent Calls to Reps. */
   handoffs: HandoffStore
   /** Waits `ms`; the Handoff ring polls with it, and a test replaces it to answer mid-ring. */
@@ -262,6 +274,18 @@ function createLlm(env: Env, logger: Logger): LlmPort {
   return createBedrockLlm({ region: env.AWS_REGION, logger, models: voiceLlmModels(env) })
 }
 
+/** Picks the chat sites: memory for a local run, otherwise fail closed until the intake service resolves keys. */
+function createChatSites(env: Env): ChatSites {
+  return env.ENVIRONMENT === 'local' ? createMemoryChatSites() : createUnconfiguredChatSites()
+}
+
+/** Picks the consent recorder: memory for a local run, otherwise fail closed until core has the route. */
+function createConsents(env: Env): ConsentRecorder {
+  return env.ENVIRONMENT === 'local'
+    ? createMemoryConsentRecorder()
+    : createUnconfiguredConsentRecorder()
+}
+
 /** Picks the directory: core over HTTP when configured, in memory only for an unconfigured local run. */
 function createDirectory(env: Env): OrganizationDirectory {
   if (env.CORE_INTERNAL_URL && env.CORE_INTERNAL_TOKEN) {
@@ -383,6 +407,9 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     agentSettings: createPostgresAgentSettingsStore(database.db),
     questions: createPostgresQualificationQuestionStore(database.db),
     turns: createPostgresAgentTurnStore(database.db),
+    chats: createPostgresChatStore(database.db),
+    chatSites: createChatSites(env),
+    consents: createConsents(env),
     handoffs: createPostgresHandoffStore(database.db),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     qualification: createPostgresQualificationStore(database.db),

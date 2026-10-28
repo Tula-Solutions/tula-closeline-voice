@@ -2,6 +2,7 @@ import { ERRORS } from 'tula-closeline-contract'
 import type { StreamingTranscribePort, TelephonyPort } from 'tula-closeline-kit'
 import { AppError } from 'tula-closeline-kit'
 import { BookingFailedError, type BookingGateway } from '~/ports/booking-gateway'
+import type { ChatSites, ConsentRecorder } from '~/ports/chat-sites'
 import type { EvidenceSearch } from '~/ports/evidence-search'
 import type { OrganizationDirectory } from '~/ports/organization-directory'
 
@@ -64,4 +65,17 @@ export function createUnconfiguredBookingGateway(): BookingGateway {
     slots: async () => Promise.reject(new BookingFailedError('booking not configured')),
     book: async () => Promise.reject(new BookingFailedError('booking not configured')),
   }
+}
+
+/** Chat sites for a deployment with no publishable-key resolution yet: every key is unavailable. */
+export function createUnconfiguredChatSites(): ChatSites {
+  return {
+    ofKey: async () => Promise.reject(unavailable()),
+    ofOrganization: async () => Promise.reject(unavailable()),
+  }
+}
+
+/** A consent recorder for a deployment with no core consent route yet: it fails closed. */
+export function createUnconfiguredConsentRecorder(): ConsentRecorder {
+  return { record: async () => Promise.reject(unavailable()) }
 }

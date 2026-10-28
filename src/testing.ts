@@ -40,6 +40,13 @@ import {
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
 import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
 import {
+  createMemoryChatSites,
+  createMemoryConsentRecorder,
+  type MemoryChatSites,
+  type MemoryConsentRecorder,
+} from '~/adapters/memory/chat-sites'
+import { createMemoryChatStore } from '~/adapters/memory/chat-store'
+import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
 } from '~/adapters/memory/evidence-search'
@@ -122,6 +129,8 @@ export type TestDeps = Container & {
   transcribe: MemoryStreamingTranscribe
   evidence: MemoryEvidenceSearch
   idempotency: MemoryIdempotencyStore
+  chatSites: MemoryChatSites
+  consents: MemoryConsentRecorder
   numbers: MemoryNumberProvisioner
   directory: MemoryOrganizationDirectory
   qualification: MemoryQualificationStore
@@ -183,6 +192,9 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     evidence: createMemoryEvidenceSearch(),
     llm: createMemoryLlm({ sleep: async () => undefined, random: () => 0 }),
     idempotency: createMemoryIdempotencyStore(),
+    chats: createMemoryChatStore(),
+    chatSites: createMemoryChatSites(),
+    consents: createMemoryConsentRecorder(),
     numbers: createMemoryNumberProvisioner(),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: overrides.telephony ?? createMemoryTelephony(),
