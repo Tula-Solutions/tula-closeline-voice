@@ -50,10 +50,10 @@ import { createPostgresQualificationStore } from '~/adapters/postgres/qualificat
 import { createPostgresRecordingStore } from '~/adapters/postgres/recording-store'
 import { createPostgresTwilioPurgeSource } from '~/adapters/postgres/twilio-purge-source'
 import { createPostgresTwilioStore } from '~/adapters/postgres/twilio-store'
+import { createTwilioNumberProvisioner } from '~/adapters/twilio/number-provisioner'
 import {
   createUnconfiguredBookingGateway,
   createUnconfiguredEvidenceSearch,
-  createUnconfiguredNumberProvisioner,
   createUnconfiguredOrganizationDirectory,
   createUnconfiguredStreamingTranscribe,
 } from '~/adapters/unconfigured'
@@ -227,6 +227,20 @@ function createTelephony(env: Env, database: Database): TelephonyPort {
   })
 }
 
+/** Picks the number provisioner: in memory for `memory`, else Twilio over the same API key. */
+function createNumbers(env: Env): NumberProvisioner {
+  if (env.TELEPHONY_PROVIDER === 'memory') {
+    return createRunningMemoryNumberProvisioner()
+  }
+  const { TWILIO_ACCOUNT_SID: accountSid, TWILIO_API_KEY_SID: apiKeySid } = env
+  const { TWILIO_API_KEY_SECRET: apiKeySecret, WEBHOOK_BASE_URL: webhookBaseUrl } = env
+  // The env schema refuses `twilio` without these, so this only narrows the types.
+  if (!(accountSid && apiKeySid && apiKeySecret && webhookBaseUrl)) {
+    throw new TypeError('TELEPHONY_PROVIDER=twilio needs its TWILIO_* keys and WEBHOOK_BASE_URL')
+  }
+  return createTwilioNumberProvisioner({ accountSid, apiKeySid, apiKeySecret, webhookBaseUrl })
+}
+
 /** The Bedrock model adapter, in the Region the service runs in. */
 /** AssemblyAI when keyed, an in-memory stand-in locally, otherwise one that fails closed. */
 function createTranscribe(env: Env): StreamingTranscribePort {
@@ -373,11 +387,8 @@ export function createContainer(env: Env = loadEnv(), options: ContainerOptions 
     llm: createLlm(env, logger),
     idempotency: createPostgresIdempotencyStore(database.db),
     // The in-memory provisioner is local-only (the env schema rejects it elsewhere); a deployment
-    // on `twilio` has no number adapter yet, so buying, porting and releasing fail closed.
-    numbers:
-      env.TELEPHONY_PROVIDER === 'memory'
-        ? createRunningMemoryNumberProvisioner()
-        : createUnconfiguredNumberProvisioner(),
+    // on `twilio` buys, ports and releases at Twilio.
+    numbers: createNumbers(env),
     numberTimeoutMs: NUMBER_PROVISIONER_TIMEOUT_MS,
     telephony: createTelephony(env, database.db),
     callEvents: createPostgresCallEventStore(database.db),
