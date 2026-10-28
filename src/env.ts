@@ -238,6 +238,8 @@ const schema = z
     LLM_OUTPUT_PRICE_MICRO_CENTS_PER_TOKEN: priceSchema.optional(),
     /** How long an inbound Call rings the Reps before it is recorded `missed`, in ms. */
     RING_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+    /** How long one Rep is rung for a warm Handoff before the next Rep is tried, in ms. */
+    HANDOFF_RING_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(20_000),
   })
   .refine((env) => env.SHUTDOWN_GRACE_MS + env.SHUTDOWN_TIMEOUT_MS <= MAX_SHUTDOWN_TOTAL_MS, {
     message: `SHUTDOWN_GRACE_MS plus SHUTDOWN_TIMEOUT_MS must not exceed ${MAX_SHUTDOWN_TOTAL_MS} ms in total`,

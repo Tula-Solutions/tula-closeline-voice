@@ -82,6 +82,17 @@ export const COPILOT_DISCLOSURE_WORDING = {
   text: 'Hello. This call is being recorded, and an AI assistant is helping the sales representative on this call, for quality and training purposes. By staying on the line you agree to the recording.',
 } as const
 
+/**
+ * The Disclosure played before a Rep is bridged onto an Agent Call (a warm Handoff), in force from
+ * version 4. It says a person is joining and that the Call is recorded and AI-assisted. It plays
+ * before the bridge and no setting skips or replaces it (ADR 0003).
+ */
+export const HANDOFF_DISCLOSURE_WORDING = {
+  version: 4,
+  aiAssisted: true,
+  text: 'One moment. I am connecting you with a sales representative. This call is being recorded, and an AI assistant is helping on this call, for quality and training purposes. By staying on the line you agree to the recording.',
+} as const
+
 const E164 = /^\+[1-9][0-9]{6,14}$/
 
 /** The most Calls a page of the list may hold, one more than the page is read to find the next. */
@@ -545,7 +556,7 @@ async function miss(
 }
 
 /** The Memberships an inbound Call to the Line rings: its assigned Rep, or its Team's online Reps. */
-async function ringSet(
+export async function ringSet(
   deps: CallDeps,
   organizationId: Caller['organizationId'],
   line: StoredLine

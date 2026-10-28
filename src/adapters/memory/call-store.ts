@@ -293,6 +293,21 @@ export function createMemoryCallStore(): MemoryCallStore {
       return copy(row.call)
     },
 
+    async joinRep(organizationId, id, join) {
+      const row = rowsOf(organizationId).get(id)
+      if (row === undefined || row.call.state !== 'live' || row.call.repMembershipId !== null) {
+        return undefined
+      }
+      row.call.repMembershipId = join.repMembershipId as VoiceCall['repMembershipId']
+      row.call.disclosure = {
+        wordingVersion: join.disclosure.wordingVersion,
+        playedAt: join.disclosure.playedAt.toISOString(),
+        aiAssisted: join.disclosure.aiAssisted,
+      }
+      row.log.push({ kind: 'disclosure_played', at: join.disclosure.playedAt })
+      return copy(row.call)
+    },
+
     async recordRecordingStarted(organizationId, id, at) {
       const row = rowsOf(organizationId).get(id)
       if (row === undefined) {

@@ -40,6 +40,7 @@ import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
 } from '~/adapters/memory/evidence-search'
+import { createMemoryHandoffStore } from '~/adapters/memory/handoff-store'
 import {
   createMemoryIdempotencyStore,
   type MemoryIdempotencyStore,
@@ -173,6 +174,8 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
       () => new Date(),
       (org, id, n) => calls.addAgentCost(org, id, n)
     ),
+    handoffs: createMemoryHandoffStore(),
+    sleep: async () => undefined,
     evidence: createMemoryEvidenceSearch(),
     llm: createMemoryLlm({ sleep: async () => undefined, random: () => 0 }),
     idempotency: createMemoryIdempotencyStore(),

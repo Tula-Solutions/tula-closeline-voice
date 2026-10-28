@@ -8,6 +8,7 @@ import type { AppEnv } from '~/http/types'
 import { createAgentSettingsRouter } from '~/modules/agent-settings/router'
 import { createCallRouter } from '~/modules/call/router'
 import { createCallTurnsRouter } from '~/modules/call-turns/router'
+import { createHandoffRouter } from '~/modules/handoff/router'
 import { createHealthRouter } from '~/modules/health/router'
 import { createLineRouter } from '~/modules/line/router'
 import { createInternalRecordingRouter, createRecordingRouter } from '~/modules/recording/router'
@@ -38,6 +39,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   publicRoutes.route('/', createCallRouter(container))
   publicRoutes.route('/', createRecordingRouter(container))
   publicRoutes.route('/', createTranscriptRouter(container))
+  publicRoutes.route('/', createHandoffRouter(container))
   app.route('/v1', publicRoutes)
   serveOpenApi(app)
 

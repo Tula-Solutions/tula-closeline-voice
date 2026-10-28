@@ -405,6 +405,34 @@ export function createPostgresCallStore(db: Database): CallStore {
       })
     },
 
+    async joinRep(organizationId, id, join) {
+      return withOrganization(db, organizationId, async (tx) => {
+        const current = await lock(tx, organizationId, id)
+        if (current === undefined || current.state !== 'live' || current.repMembershipId !== null) {
+          return undefined
+        }
+        const [row] = await tx
+          .update(voiceCalls)
+          .set({
+            repMembershipId: join.repMembershipId,
+            disclosureWordingVersion: join.disclosure.wordingVersion,
+            disclosurePlayedAt: join.disclosure.playedAt,
+            aiAssisted: join.disclosure.aiAssisted,
+            updatedAt: sql`now()`,
+          })
+          .where(one(organizationId, id))
+          .returning()
+        if (row === undefined) {
+          throw new Error('update returned no row')
+        }
+        await log(tx, organizationId, id, {
+          kind: 'disclosure_played',
+          occurredAt: join.disclosure.playedAt,
+        })
+        return toStored(row)
+      })
+    },
+
     async recordRecordingStarted(organizationId, id, at) {
       await withOrganization(db, organizationId, async (tx) => {
         const current = await lock(tx, organizationId, id)

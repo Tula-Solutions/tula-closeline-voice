@@ -1,16 +1,18 @@
-import type { VoiceCall } from 'tula-closeline-contract'
+import type { Handoff, OrganizationId, VoiceCall } from 'tula-closeline-contract'
 import { type LlmUsage, type TtsAudioChunk, TtsError, type TtsPort } from 'tula-closeline-kit'
 import { DEFAULT_AGENT_SETTINGS } from '~/modules/agent-settings/service'
 import * as AgentTools from '~/modules/agent-tools/service'
 import * as Calls from '~/modules/call/service'
 import { AGENT_DISCLOSURE_WORDING } from '~/modules/call/service'
 import * as Conversation from '~/modules/conversation/engine'
+import * as Handoffs from '~/modules/handoff/service'
 import { InvalidTransitionError, type StoredCall } from '~/ports/call-store'
 
 /** What the speech loop needs from the container, plus the text-to-speech engine. */
 export type AgentCallDeps = Calls.CallDeps &
   Conversation.ConversationDeps &
-  AgentTools.AgentToolsDeps & {
+  AgentTools.AgentToolsDeps &
+  Handoffs.HandoffDeps & {
     /** Turns the Agent's words into audio. */
     tts: TtsPort
   }
@@ -317,6 +319,7 @@ export type HearOutcome =
   | { kind: 'not_live' }
   | { kind: 'replied'; interrupted: boolean; ended: NonNullable<VoiceCall['endReason']> | null }
   | { kind: 'ended'; endReason: NonNullable<VoiceCall['endReason']> }
+  | { kind: 'handed_off' }
 
 /**
  * Handles one settled Prospect turn of a live Agent Call: checks the caps before the model is
@@ -344,6 +347,9 @@ export async function hear(
   }
   if (call.state !== 'live') {
     return { kind: 'not_live' }
+  }
+  if (call.repMembershipId !== null) {
+    return { kind: 'handed_off' }
   }
   const settings = (await deps.agentSettings.get(organizationId)) ?? DEFAULT_AGENT_SETTINGS
   const capped = capReached(deps, call, settings)
@@ -399,9 +405,40 @@ export async function hear(
         : capReached(deps, call, settings)
   if (after !== null) {
     await end(deps, organizationId, call, after)
+    return { kind: 'replied', interrupted, ended: after }
   }
-  return { kind: 'replied', interrupted, ended: after }
+  const reason: Handoff['reason'] | null =
+    result.toolCall?.name === 'hand_off'
+      ? result.toolCall.arguments.reason
+      : result.deferred
+        ? 'agent_unsure'
+        : null
+  if (reason !== null) {
+    const handoff = await Handoffs.start(deps, {
+      organizationId: organizationId as OrganizationId,
+      callId,
+      reason,
+    })
+    if (handoff.kind === 'bridged') {
+      return { kind: 'handed_off' }
+    }
+    if (handoff.kind === 'booking_offered') {
+      await speakText(
+        deps,
+        organizationId,
+        settings.voiceStyle,
+        NO_REP_REPLY,
+        input.sink,
+        input.bargeIn
+      )
+    }
+  }
+  return { kind: 'replied', interrupted, ended: null }
 }
+
+/** Said when no Rep could take the Call; the Agent's own booking tools take it from there. */
+const NO_REP_REPLY =
+  'I cannot reach anyone from the team right now. I can book a time with them instead. Would you like me to find a time?'
 
 /** The cap the Call has reached, if any: its length or what the Agent has cost. */
 function capReached(
