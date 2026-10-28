@@ -8,15 +8,15 @@ from the hub (`tula-closeline`). This file holds only what is specific to this r
 
 ## Commands
 
-| Command | Use |
-| --- | --- |
-| `bun install` | install, including the tagged `tula-closeline-*` libraries |
-| `bun run verify` | the full gate, exactly what CI runs |
-| `bun run verify:changed` | the quick gate the Stop hook runs |
-| `bun test` | tests |
+| Command                    | Use                                                                                                                                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`              | install, including the tagged `tula-closeline-*` libraries                                                                             |
+| `bun run verify`           | the full gate, exactly what CI runs                                                                                                    |
+| `bun run verify:changed`   | the quick gate the Stop hook runs                                                                                                      |
+| `bun test`                 | tests                                                                                                                                  |
 | `bun run test:integration` | the `*.integration.ts` suites against compose Postgres (`docker compose up -d --wait`; `POSTGRES_PORT` moves it); not part of `verify` |
-| `bun run bench` | the benchmarks and their budgets |
-| `bun run openapi` | rewrite `openapi.json` after a route or schema change |
+| `bun run bench`            | the benchmarks and their budgets                                                                                                       |
+| `bun run openapi`          | rewrite `openapi.json` after a route or schema change                                                                                  |
 
 Other scripts are in `package.json`.
 
@@ -57,6 +57,19 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
   Admin all; any other Call is `call.not_found`. `Calls.end` is service-only (no route yet).
   The place-Call path is not a hot path: a Rep places a few Calls a minute and it is bound by the
   provider's latency, so it has no benchmark.
+- `src/modules/transcript/` is the Copilot live Transcript. A Rep dials with `copilot: true`; the Call
+  plays `COPILOT_DISCLOSURE_WORDING` (version 3, `aiAssisted`, no setting, ADR 0003) and only after it is
+  stored and the Call is `live` does `Transcript.start` fork both tracks (`forkTracks`) and open one
+  speech-to-text stream per track (`transcribe` port: AssemblyAI when `ASSEMBLYAI_API_KEY` is set, the
+  kit memory stand-in when `ENVIRONMENT=local`, else fails closed). A Call is a Copilot Call when its
+  stored Disclosure has `aiAssisted` and it has a Rep. Final turns are saved once each through
+  `CallTurnStore` (`voice.call_turns`, sequence per track; O(1) per turn, no hot-path benchmark).
+  `GET /v1/calls/{callId}/copilot/stream` is SSE (`copilot.status`, `transcript.turn`,
+  `transcript.unavailable`); ids are cursors `r<n>.p<m>` and `Last-Event-ID` resumes from the store.
+  A speech-to-text failure never touches the Call: it marks the Transcript unavailable and the stream
+  says so. Shortcut: open streams and the unavailable flag live in process memory (one instance,
+  `container.copilot`); move them to a column before running more than one instance. The Twilio media
+  websocket that feeds `Transcript.pushAudio` is not built yet.
 - Ports (`src/ports/`): `CallStore` (Postgres and memory; every event row is written in the same
   transaction as the change), `LineStore`, `IdempotencyStore` (stored answers of `Idempotency-Key`
   requests; `POST /v1/lines` reserves the key, buys, inserts the Line and completes the key in one
@@ -93,7 +106,7 @@ The shape in `.claude/COMMON.md` is built; add modules under `src/modules/<name>
 `REGION`, `DATABASE_URL`, `AUTH_JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AWS_REGION`,
 `QUEUE_URL`, `STORAGE_BUCKET`, `TELEPHONY_PROVIDER` (`memory|twilio`), and with `twilio` the keys
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY_SID`, `TWILIO_API_KEY_SECRET`,
-`TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local),
+`TWILIO_TWIML_APP_SID`, `WEBHOOK_BASE_URL` (the public https origin Twilio signs; http only local), `ASSEMBLYAI_API_KEY` (optional; live speech-to-text),
 `BOOKING_LINK_TOKENS` (a JSON map of Organization id to the token of its Booking Type link, a credential never logged; unset means no booking over HTTP, a shortcut until Agent settings carry the link), `PLAYBOOK_INTERNAL_URL` and `PLAYBOOK_INTERNAL_TOKEN` (the Playbook's origin and internal secret; same rules as the core pair), `CORE_INTERNAL_URL` and `CORE_INTERNAL_TOKEN` (core's origin and the `Authorization: Bearer` secret
 in its `INTERNAL_API_TOKENS`; set together; required outside local, where unset means an empty
 in-memory directory),

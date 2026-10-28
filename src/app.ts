@@ -11,6 +11,7 @@ import { createCallTurnsRouter } from '~/modules/call-turns/router'
 import { createHealthRouter } from '~/modules/health/router'
 import { createLineRouter } from '~/modules/line/router'
 import { createSoftphoneRouter } from '~/modules/softphone/router'
+import { createTranscriptRouter } from '~/modules/transcript/router'
 import { createWebhookRouter } from '~/modules/webhook/router'
 import { serveOpenApi } from '~/openapi'
 
@@ -33,6 +34,7 @@ export function createApp(container: Container): OpenAPIHono<AppEnv> {
   publicRoutes.route('/', createAgentSettingsRouter(container))
   publicRoutes.route('/', createSoftphoneRouter(container))
   publicRoutes.route('/', createCallRouter(container))
+  publicRoutes.route('/', createTranscriptRouter(container))
   app.route('/v1', publicRoutes)
   serveOpenApi(app)
 

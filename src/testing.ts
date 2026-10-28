@@ -12,10 +12,12 @@ import {
 } from 'tula-closeline-kit'
 import {
   createMemoryLlm,
+  createMemoryStreamingTranscribe,
   createMemoryTelephony,
   createTestJwks,
   createTestKeyPair,
   type MemoryLlm,
+  type MemoryStreamingTranscribe,
   mintTestToken,
 } from 'tula-closeline-kit/testing'
 import { createMemoryAgentSettingsStore } from '~/adapters/memory/agent-settings-store'
@@ -29,6 +31,7 @@ import {
   type MemoryCallEventStore,
 } from '~/adapters/memory/call-event-store'
 import { createMemoryCallStore, type MemoryCallStore } from '~/adapters/memory/call-store'
+import { createMemoryCallTurnStore } from '~/adapters/memory/call-turn-store'
 import {
   createMemoryEvidenceSearch,
   type MemoryEvidenceSearch,
@@ -55,6 +58,7 @@ import { createApp } from '~/app'
 import type { Container, ErrorContext, ReadinessCheck } from '~/container'
 import { loadEnv } from '~/env'
 import { SERVICE } from '~/info'
+import { createCopilotRuntime } from '~/modules/transcript/runtime'
 import { NUMBER_PROVISIONER_TIMEOUT_MS } from '~/ports/number-provisioner'
 
 /** Every key a deployed environment must set, so a test can run as any ENVIRONMENT. */
@@ -96,6 +100,7 @@ const REJECTING_VERIFIER: TokenVerifier = {
 export type TestDeps = Container & {
   clock: FixedClock
   llm: MemoryLlm
+  transcribe: MemoryStreamingTranscribe
   evidence: MemoryEvidenceSearch
   idempotency: MemoryIdempotencyStore
   numbers: MemoryNumberProvisioner
@@ -156,6 +161,9 @@ export function createTestDeps(overrides: TestDepsOverrides = {}): TestDeps {
     telephony: overrides.telephony ?? createMemoryTelephony(),
     callEvents: createMemoryCallEventStore(),
     calls,
+    callTurns: createMemoryCallTurnStore(),
+    transcribe: createMemoryStreamingTranscribe({ sleep: async () => undefined, random: () => 0 }),
+    copilot: createCopilotRuntime(5),
     directory: createMemoryOrganizationDirectory(),
     close: async () => undefined,
     readinessChecks: overrides.readinessChecks ?? [],

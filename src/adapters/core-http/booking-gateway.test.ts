@@ -22,6 +22,7 @@ const confirmation = {
   endsAt: END,
   mode: 'phone',
   joinUrl: null,
+  manageToken: 'm'.repeat(43),
 }
 
 /** A gateway over a scripted fetch: the last answer repeats. */
