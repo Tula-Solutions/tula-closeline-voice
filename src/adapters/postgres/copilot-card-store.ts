@@ -130,7 +130,7 @@ export function createPostgresCopilotCardStore(db: Database): CopilotCardStore {
         }
         const [updated] = await tx
           .update(voiceCopilotCards)
-          .set({ ...next, updatedAt: new Date() })
+          .set({ ...next, updatedAt: new Date(Math.max(Date.now(), row.updatedAt.getTime() + 1)) })
           .where(
             and(
               eq(voiceCopilotCards.organizationId, organizationId),

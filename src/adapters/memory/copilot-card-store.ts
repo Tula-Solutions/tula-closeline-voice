@@ -51,7 +51,9 @@ export function createMemoryCopilotCardStore(): CopilotCardStore {
       cards[at] = next
       const changed = JSON.stringify(next) !== JSON.stringify(old)
       if (changed || !updatedAt.has(cardId)) {
-        updatedAt.set(cardId, new Date())
+        // a later change must get a later time, or its event id would repeat
+        const last = updatedAt.get(cardId)?.getTime() ?? 0
+        updatedAt.set(cardId, new Date(Math.max(Date.now(), last + 1)))
       }
       return { card: structuredClone(next), changed, updatedAt: updatedAt.get(cardId) as Date }
     },
