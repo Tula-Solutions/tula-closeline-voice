@@ -174,7 +174,7 @@ with its idempotent turn inserts and one atomic cost add, streaming TTS; O(1) in
 and reads a bounded window of recent turns), the Agent Call gate (`evaluateGate`: about six keyed or
 indexed reads, O(1) in the Organization), and one retrieval card check after a Prospect turn
 (`Cards.onProspectTurn`: one keyed read of the Organization's Copilot settings, two tallies of one
-Call's cards, one bounded search, one insert, and one model upgrade call; O(1) in the Organization).
+Call's cards, one bounded search, one insert, one keyed quiet-reason write, and one model upgrade call; O(1) in the Organization).
 Budgets are in `bench/` (`bench/webhook.bench.test.ts`,
 `bench/agent-turn.bench.test.ts`, `bench/agent-call-gate.bench.test.ts`,
 `bench/copilot-card.bench.test.ts`, `bench/copilot-compose.bench.test.ts`).
